@@ -45,6 +45,7 @@ type xrayStream struct {
 		Password    string `json:"password"`
 		ShortID     string `json:"shortId"`
 		SpiderX     string `json:"spiderX"`
+		Mldsa65     string `json:"mldsa65Verify"`
 	} `json:"realitySettings"`
 	TLS *struct {
 		ServerName  string   `json:"serverName"`
@@ -149,7 +150,7 @@ func xrayOutboundToTransport(ob xrayOutbound) (*Transport, error) {
 	if st := ob.StreamSettings; st != nil {
 		c.Network, c.Security = st.Network, st.Security
 		if r := st.Reality; r != nil {
-			c.SNI, c.Fingerprint, c.ShortID, c.SpiderX = r.ServerName, r.Fingerprint, r.ShortID, r.SpiderX
+			c.SNI, c.Fingerprint, c.ShortID, c.SpiderX, c.Mldsa65Verify = r.ServerName, r.Fingerprint, r.ShortID, r.SpiderX, r.Mldsa65
 			c.PublicKey = r.PublicKey
 			if c.PublicKey == "" {
 				c.PublicKey = r.Password

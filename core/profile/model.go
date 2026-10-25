@@ -147,6 +147,8 @@ type VLESSConfig struct {
 	PublicKey   string   `json:"publicKey,omitempty"` // REALITY password (x25519 public key)
 	ShortID     string   `json:"shortId,omitempty"`
 	SpiderX     string   `json:"spiderX,omitempty"`
+	// Mldsa65Verify is the optional post-quantum REALITY verification key.
+	Mldsa65Verify string `json:"mldsa65Verify,omitempty"`
 	// Transport specific.
 	Path        string `json:"path,omitempty"`
 	Host        string `json:"host,omitempty"`

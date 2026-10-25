@@ -23,21 +23,22 @@ func ParseVLESSURL(s string) (*Transport, string, error) {
 	}
 	q := u.Query()
 	c := &VLESSConfig{
-		Address:     u.Hostname(),
-		Port:        port,
-		UUID:        u.User.Username(),
-		Flow:        q.Get("flow"),
-		Security:    q.Get("security"),
-		Network:     q.Get("type"),
-		SNI:         q.Get("sni"),
-		Fingerprint: q.Get("fp"),
-		PublicKey:   q.Get("pbk"),
-		ShortID:     q.Get("sid"),
-		SpiderX:     q.Get("spx"),
-		Path:        q.Get("path"),
-		Host:        q.Get("host"),
-		Mode:        q.Get("mode"),
-		ServiceName: q.Get("serviceName"),
+		Address:       u.Hostname(),
+		Port:          port,
+		UUID:          u.User.Username(),
+		Flow:          q.Get("flow"),
+		Security:      q.Get("security"),
+		Network:       q.Get("type"),
+		SNI:           q.Get("sni"),
+		Fingerprint:   q.Get("fp"),
+		PublicKey:     q.Get("pbk"),
+		ShortID:       q.Get("sid"),
+		SpiderX:       q.Get("spx"),
+		Mldsa65Verify: q.Get("pqv"),
+		Path:          q.Get("path"),
+		Host:          q.Get("host"),
+		Mode:          q.Get("mode"),
+		ServiceName:   q.Get("serviceName"),
 	}
 	if a := q.Get("alpn"); a != "" {
 		c.ALPN = splitList(a)
@@ -77,6 +78,7 @@ func FormatVLESSURL(c *VLESSConfig, name string) string {
 	set("pbk", c.PublicKey)
 	set("sid", c.ShortID)
 	set("spx", c.SpiderX)
+	set("pqv", c.Mldsa65Verify)
 	set("path", c.Path)
 	set("host", c.Host)
 	set("mode", c.Mode)
