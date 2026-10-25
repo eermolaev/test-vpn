@@ -291,3 +291,51 @@ func TestAmneziaSubscriptionKey(t *testing.T) {
 		t.Fatalf("subscription key: %v", err)
 	}
 }
+
+func TestAWG3Conf(t *testing.T) {
+	conf := `[Interface]
+PrivateKey = MGq8tF2qJmcY3bE1QaX4m0Z3lKZ0b9Hf0QxW1y8nPkA=
+Address = 10.8.1.2/32
+DNS = 1.1.1.1
+Jc = 4
+Jmin = 10
+Jmax = 50
+S1 = 20
+S2 = 30
+S3 = 14
+S4 = 12
+H1 = 100-200
+H2 = 300-400
+H3 = 500-600
+H4 = 700-800
+HeaderProtectionKey = BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
+ContentPaddingAddition = 0-64
+RekeyAfterTime = 110-130
+RejectAfterTime = 170-190
+RandomTrailers = true
+DisableCookies = false
+
+[Peer]
+PublicKey = k1Wd0qQe4u7m3m9oCq7JmR6f0zQy2l3wP9xT5bV8nHs=
+Endpoint = 203.0.113.5:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 20-30
+AdvancedSecurity = on
+`
+	tr, err := ParseAWGConf(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := tr.AWG
+	if a.HeaderProtectionKey == "" || a.ContentPaddingAddition != "0-64" || a.RekeyAfterTime != "110-130" ||
+		!a.RandomTrailers || a.DisableCookies || a.Peer.KeepaliveRange != "20-30" {
+		t.Fatalf("parsed %+v", a)
+	}
+	if err := tr.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	bad := strings.Replace(conf, "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=", "short", 1)
+	if tr, err := ParseAWGConf(bad); err == nil && tr.Validate() == nil {
+		t.Fatal("bad header protection key must be rejected")
+	}
+}

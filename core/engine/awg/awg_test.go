@@ -57,6 +57,46 @@ func TestEndToEnd(t *testing.T) {
 	u.Close()
 }
 
+// TestAWG3 connects with the AmneziaWG 3 options exported by Amnezia
+// Premium configs, going through the .conf format like a real import.
+func TestAWG3(t *testing.T) {
+	srv := testenv.StartAWG(t, testenv.ObfuscationV3(), [4]byte{1, 2, 3, 4})
+	srv.Client.Peer.KeepaliveRange = "20-30"
+	srv.Client.KeepaliveTimeout = "8-12"
+	tr, err := profile.ParseAWGConf(profile.FormatAWGConf(srv.Client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.AWG.HeaderProtectionKey == "" || !tr.AWG.RandomTrailers || tr.AWG.Peer.KeepaliveRange != "20-30" {
+		t.Fatalf("round trip lost AWG 3 fields: %+v", tr.AWG)
+	}
+	ctx := context.Background()
+	e, err := Start(ctx, tr.AWG, Options{HandshakeTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	c, err := e.DialTCP(ctx, netip.AddrPortFrom(testenv.AWGServerIP, 7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	c.Write([]byte("v3"))
+	buf := make([]byte, 64)
+	if n, err := io.ReadAtLeast(c, buf, len("awg:v3")); err != nil || string(buf[:n]) != "awg:v3" {
+		t.Fatalf("tcp echo: %q %v", buf[:n], err)
+	}
+
+	// A wrong header protection key must not connect.
+	bad := *tr.AWG
+	bad.HeaderProtectionKey = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+	if e2, err := Start(ctx, &bad, Options{HandshakeTimeout: 2 * time.Second}); err == nil {
+		e2.Close()
+		t.Fatal("wrong header protection key must fail")
+	}
+}
+
 func TestObfuscationMismatch(t *testing.T) {
 	srv := testenv.StartAWG(t, testenv.Obfuscation(), [4]byte{1, 2, 3, 4})
 	client := *srv.Client

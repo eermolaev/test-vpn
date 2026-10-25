@@ -13,6 +13,9 @@ var ignoredAWGKeys = map[string]bool{
 	"table": true, "saveconfig": true, "fwmark": true, "listenport": true,
 }
 
+// ignoredPeerKeys only matter to the Linux kernel module.
+var ignoredPeerKeys = map[string]bool{"advancedsecurity": true}
+
 // ParseAWGConf parses an AmneziaWG (wg-quick style) config. Unknown keys are
 // rejected rather than silently ignored (spec 4.2), except wg-quick hooks.
 func ParseAWGConf(text string) (*Transport, error) {
@@ -111,6 +114,16 @@ func parsePrefixes(v string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
+func parseBool(v string) (bool, error) {
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	}
+	return false, errText("not a boolean")
+}
+
 func atoi(v string) (int, error) {
 	n, err := strconv.Atoi(v)
 	if err != nil {
@@ -168,6 +181,24 @@ func (c *AWGConfig) setInterface(key, val string) error {
 		c.I4 = val
 	case "i5":
 		c.I5 = val
+	case "headerprotectionkey":
+		c.HeaderProtectionKey = val
+	case "contentpaddingaddition":
+		c.ContentPaddingAddition = val
+	case "rekeyaftertime":
+		c.RekeyAfterTime = val
+	case "rekeytimeout":
+		c.RekeyTimeout = val
+	case "rejectaftertime":
+		c.RejectAfterTime = val
+	case "keepalivetimeout":
+		c.KeepaliveTimeout = val
+	case "maxhandshakeattempts":
+		c.MaxHandshakeAttempts = val
+	case "randomtrailers":
+		c.RandomTrailers, err = parseBool(val)
+	case "disablecookies":
+		c.DisableCookies, err = parseBool(val)
 	default:
 		if !ignoredAWGKeys[key] {
 			return errText("unknown parameter")
@@ -188,9 +219,15 @@ func (p *AWGPeer) set(key, val string) error {
 	case "allowedips":
 		p.AllowedIPs, err = parsePrefixes(val)
 	case "persistentkeepalive":
-		p.Keepalive, err = atoi(val)
+		if strings.Contains(val, "-") {
+			p.KeepaliveRange = val
+		} else if val != "off" {
+			p.Keepalive, err = atoi(val)
+		}
 	default:
-		return errText("unknown parameter")
+		if !ignoredPeerKeys[key] {
+			return errText("unknown parameter")
+		}
 	}
 	return err
 }
@@ -228,14 +265,27 @@ func FormatAWGConf(c *AWGConfig) string {
 	}{{"Jc", c.Jc}, {"Jmin", c.Jmin}, {"Jmax", c.Jmax}, {"S1", c.S1}, {"S2", c.S2}, {"S3", c.S3}, {"S4", c.S4}} {
 		w(kv.k, strconv.Itoa(kv.v))
 	}
-	for _, kv := range [][2]string{{"H1", c.H1}, {"H2", c.H2}, {"H3", c.H3}, {"H4", c.H4}, {"I1", c.I1}, {"I2", c.I2}, {"I3", c.I3}, {"I4", c.I4}, {"I5", c.I5}} {
+	for _, kv := range [][2]string{{"H1", c.H1}, {"H2", c.H2}, {"H3", c.H3}, {"H4", c.H4}, {"I1", c.I1}, {"I2", c.I2}, {"I3", c.I3}, {"I4", c.I4}, {"I5", c.I5},
+		{"HeaderProtectionKey", c.HeaderProtectionKey}, {"ContentPaddingAddition", c.ContentPaddingAddition},
+		{"RekeyAfterTime", c.RekeyAfterTime}, {"RekeyTimeout", c.RekeyTimeout}, {"RejectAfterTime", c.RejectAfterTime},
+		{"KeepaliveTimeout", c.KeepaliveTimeout}, {"MaxHandshakeAttempts", c.MaxHandshakeAttempts}} {
 		w(kv[0], kv[1])
+	}
+	if c.RandomTrailers {
+		w("RandomTrailers", "true")
+	}
+	if c.DisableCookies {
+		w("DisableCookies", "true")
 	}
 	b.WriteString("\n[Peer]\n")
 	w("PublicKey", c.Peer.PublicKey)
 	w("PresharedKey", c.Peer.PresharedKey)
 	w("Endpoint", c.Peer.Endpoint)
 	w("AllowedIPs", join(c.Peer.AllowedIPs))
-	w("PersistentKeepalive", strconv.Itoa(c.Peer.Keepalive))
+	if c.Peer.KeepaliveRange != "" {
+		w("PersistentKeepalive", c.Peer.KeepaliveRange)
+	} else {
+		w("PersistentKeepalive", strconv.Itoa(c.Peer.Keepalive))
+	}
 	return b.String()
 }

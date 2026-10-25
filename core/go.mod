@@ -6,7 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.0.10
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/amnezia-vpn/amneziawg-go v0.2.19
+	github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260828
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/maxmind/mmdbwriter v1.2.0
 	github.com/oschwald/maxminddb-golang/v2 v2.7.0

@@ -1,15 +1,17 @@
 package testenv
 
 import (
+	"bytes"
+	"encoding/base64"
 	"net"
 	"net/netip"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/amnezia-vpn/amneziawg-go/conn"
-	"github.com/amnezia-vpn/amneziawg-go/device"
-	"github.com/amnezia-vpn/amneziawg-go/tun/netstack"
+	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
 	"github.com/eermolaev/test-vpn/core/profile"
 )
 
@@ -36,6 +38,17 @@ func Obfuscation() profile.AWGConfig {
 	}
 }
 
+// ObfuscationV3 adds AmneziaWG 3 header protection, content padding and
+// random trailers to Obfuscation.
+func ObfuscationV3() profile.AWGConfig {
+	c := Obfuscation()
+	c.S1, c.S2, c.S3, c.S4 = 20, 40, 16, 12 // header protection needs >= 12
+	c.HeaderProtectionKey = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	c.ContentPaddingAddition = "10-40"
+	c.RandomTrailers = true
+	return c
+}
+
 // StartAWG starts a server with the given obfuscation parameters.
 func StartAWG(t testing.TB, obf profile.AWGConfig, dnsAnswer [4]byte) *AWGServer {
 	t.Helper()
@@ -60,10 +73,27 @@ func StartAWG(t testing.TB, obf profile.AWGConfig, dnsAnswer [4]byte) *AWGServer
 			w(kv[0], kv[1])
 		}
 	}
+	// AmneziaWG 3: header protection must match; the rest is per side.
+	if obf.HeaderProtectionKey != "" {
+		k, _ := base64.StdEncoding.DecodeString(obf.HeaderProtectionKey)
+		w("header_protection_key", hexKey(k))
+	}
+	if obf.ContentPaddingAddition != "" {
+		w("content_padding_addition", obf.ContentPaddingAddition)
+	}
+	if obf.RandomTrailers {
+		w("random_trailers", "true")
+	}
 	w("public_key", hexKey(cliPub))
 	w("allowed_ip", AWGClientIP.String()+"/32")
 	if err := dev.IpcSet(b.String()); err != nil {
 		t.Fatal(err)
+	}
+	// Same workaround as awg.FlushReader (importing it would be a cycle):
+	// make the TUN reader pick up the configured S4 padding.
+	if c, err := tnet.DialUDPAddrPort(netip.AddrPort{}, netip.MustParseAddrPort("192.0.2.1:9")); err == nil {
+		c.Write([]byte{0})
+		c.Close()
 	}
 	if err := dev.Up(); err != nil {
 		t.Fatal(err)

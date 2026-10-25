@@ -3,7 +3,7 @@
 The project has two parts:
 
 - `core/` — the Go core: userspace network stack, router with domain
-  exclusions, split DNS, xray-core (VLESS + REALITY) and amneziawg-go
+  exclusions, split DNS, xray-core (VLESS + REALITY) and amneziawg-go v3 (AmneziaWG 1.x–3: header protection, content padding, random trailers, timings)
   engines, fallback, kill switch, exit verification. It is tested on Linux
   and macOS without any Apple tooling.
 - `apple/` — the SwiftUI app for iOS 26+ and macOS 26+ and the packet tunnel

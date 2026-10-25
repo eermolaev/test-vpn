@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/amnezia-vpn/amneziawg-go/conn"
-	"github.com/amnezia-vpn/amneziawg-go/device"
-	"github.com/amnezia-vpn/amneziawg-go/tun/netstack"
+	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
 	"github.com/eermolaev/test-vpn/core/errclass"
 	"github.com/eermolaev/test-vpn/core/profile"
 )
@@ -83,6 +83,28 @@ func UAPI(c *profile.AWGConfig, endpoint netip.AddrPort) (string, error) {
 			kv(h[0], h[1])
 		}
 	}
+	if c.HeaderProtectionKey != "" {
+		hp, err := keyHex(c.HeaderProtectionKey)
+		if err != nil {
+			return "", fmt.Errorf("header protection key: %w", err)
+		}
+		kv("header_protection_key", hp)
+	}
+	for _, r := range [][2]string{
+		{"content_padding_addition", c.ContentPaddingAddition}, {"rekey_after_time", c.RekeyAfterTime},
+		{"rekey_timeout", c.RekeyTimeout}, {"reject_after_time", c.RejectAfterTime},
+		{"keepalive_timeout", c.KeepaliveTimeout}, {"max_handshake_attempts", c.MaxHandshakeAttempts},
+	} {
+		if r[1] != "" {
+			kv(r[0], r[1])
+		}
+	}
+	if c.RandomTrailers {
+		kv("random_trailers", "true")
+	}
+	if c.DisableCookies {
+		kv("disable_cookies", "true")
+	}
 	kv("replace_peers", "true")
 	kv("public_key", pub)
 	if c.Peer.PresharedKey != "" {
@@ -97,7 +119,11 @@ func UAPI(c *profile.AWGConfig, endpoint netip.AddrPort) (string, error) {
 	if keepalive == 0 {
 		keepalive = 25 // keeps NAT mappings and lets us notice dead servers
 	}
-	kvi("persistent_keepalive_interval", keepalive)
+	if c.Peer.KeepaliveRange != "" {
+		kv("persistent_keepalive_interval", c.Peer.KeepaliveRange)
+	} else {
+		kvi("persistent_keepalive_interval", keepalive)
+	}
 	kv("replace_allowed_ips", "true")
 	for _, p := range c.Peer.AllowedIPs {
 		if p.Addr().Is4() {
@@ -168,6 +194,7 @@ func Start(ctx context.Context, c *profile.AWGConfig, opts Options) (*Engine, er
 		dev.Close()
 		return nil, errclass.Wrap(errclass.Config, fmt.Errorf("awg config: %w", err))
 	}
+	FlushReader(tnet)
 	if err := dev.Up(); err != nil {
 		dev.Close()
 		return nil, errclass.Wrap(errclass.NoNetwork, err)
@@ -182,6 +209,21 @@ func Start(ctx context.Context, c *profile.AWGConfig, opts Options) (*Engine, er
 		return nil, err
 	}
 	return e, nil
+}
+
+// FlushReader works around a race in amneziawg-go v3: the device's TUN
+// reader loads the transport padding (S4) before it blocks waiting for a
+// packet, and the netstack TUN is up before the config is applied. The
+// first packet would then go out without padding and the server would drop
+// it. One throwaway datagram (to TEST-NET-1, dropped by the server) makes
+// the reader loop once and pick up the configured padding.
+func FlushReader(tnet *netstack.Net) {
+	c, err := tnet.DialUDPAddrPort(netip.AddrPort{}, netip.MustParseAddrPort("192.0.2.1:9"))
+	if err != nil {
+		return
+	}
+	c.Write([]byte{0})
+	c.Close()
 }
 
 func defaultResolve(ctx context.Context, host string) (netip.Addr, error) {

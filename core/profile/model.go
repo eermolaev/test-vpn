@@ -3,6 +3,7 @@
 package profile
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -103,6 +104,18 @@ type AWGConfig struct {
 	I4 string `json:"i4,omitempty"`
 	I5 string `json:"i5,omitempty"`
 
+	// AmneziaWG 3 parameters. HeaderProtectionKey is base64 and must match
+	// the server; the others are numbers or ranges "min-max".
+	HeaderProtectionKey    string `json:"headerProtectionKey,omitempty"`
+	ContentPaddingAddition string `json:"contentPaddingAddition,omitempty"`
+	RekeyAfterTime         string `json:"rekeyAfterTime,omitempty"`
+	RekeyTimeout           string `json:"rekeyTimeout,omitempty"`
+	RejectAfterTime        string `json:"rejectAfterTime,omitempty"`
+	KeepaliveTimeout       string `json:"keepaliveTimeout,omitempty"`
+	MaxHandshakeAttempts   string `json:"maxHandshakeAttempts,omitempty"`
+	RandomTrailers         bool   `json:"randomTrailers,omitempty"`
+	DisableCookies         bool   `json:"disableCookies,omitempty"`
+
 	Peer AWGPeer `json:"peer"`
 }
 
@@ -113,6 +126,8 @@ type AWGPeer struct {
 	Endpoint     string         `json:"endpoint"` // host:port
 	AllowedIPs   []netip.Prefix `json:"allowedIPs"`
 	Keepalive    int            `json:"keepalive,omitempty"`
+	// KeepaliveRange is a randomized interval "min-max" (AmneziaWG 3).
+	KeepaliveRange string `json:"keepaliveRange,omitempty"`
 }
 
 // Obfuscated reports whether any AmneziaWG obfuscation is configured. Without
@@ -281,6 +296,21 @@ func (c *AWGConfig) validate() error {
 	for i, h := range []string{c.H1, c.H2, c.H3, c.H4} {
 		if h != "" && !validMagicHeader(h) {
 			return invalid("awg: bad H%d %q", i+1, h)
+		}
+	}
+	for _, r := range []struct{ name, v string }{
+		{"ContentPaddingAddition", c.ContentPaddingAddition}, {"RekeyAfterTime", c.RekeyAfterTime},
+		{"RekeyTimeout", c.RekeyTimeout}, {"RejectAfterTime", c.RejectAfterTime},
+		{"KeepaliveTimeout", c.KeepaliveTimeout}, {"MaxHandshakeAttempts", c.MaxHandshakeAttempts},
+		{"PersistentKeepalive", c.Peer.KeepaliveRange},
+	} {
+		if r.v != "" && !validMagicHeader(r.v) {
+			return invalid("awg: bad %s %q", r.name, r.v)
+		}
+	}
+	if c.HeaderProtectionKey != "" {
+		if k, err := base64.StdEncoding.DecodeString(c.HeaderProtectionKey); err != nil || len(k) != 32 {
+			return invalid("awg: HeaderProtectionKey must be a base64 32-byte key")
 		}
 	}
 	if c.MTU != 0 && (c.MTU < 1280 || c.MTU > 1500) {
