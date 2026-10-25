@@ -113,7 +113,9 @@ func Start(pio netstack.PacketIO, cfg Config, deps Deps) (*Tunnel, error) {
 	t.dnsShown = serversString(comp.dns.TunnelServers)
 	t.dnsAddrs = comp.dns.TunnelServers
 	t.status = Status{State: StateConnecting, Since: time.Now(), Exclusions: comp.router.Exclusions.Len(), DNSServers: t.dnsShown}
-	st, err := netstack.New(pio, t.router, netstack.Options{MTU: cfg.MTU})
+	so := cfg.Stack
+	so.MTU = cfg.MTU
+	st, err := netstack.New(pio, t.router, so)
 	if err != nil {
 		return nil, err
 	}

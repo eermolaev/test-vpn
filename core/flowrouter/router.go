@@ -87,7 +87,7 @@ const (
 	udpIdleTimeout  = 60 * time.Second
 	dnsIdleTimeout  = 20 * time.Second
 	maxDatagram     = 65535
-	relayBufferSize = 16 << 10
+	relayBufferSize = 32 << 10
 )
 
 var bufPool = sync.Pool{New: func() any { b := make([]byte, relayBufferSize); return &b }}
@@ -216,7 +216,15 @@ func (r *Router) HandleTCP(c *netstack.TCPConn) {
 		r.serveDNSOverTCP(c)
 		return
 	}
-	prefix, host, proto := sniffStream(c)
+	// Without domain rules the name is not needed for routing: skip
+	// sniffing, which delays server-first protocols (SMTP, FTP) by up to
+	// sniffTimeout. The DNS cache still names the flow.
+	var prefix []byte
+	var host string
+	var proto sniff.Protocol
+	if s := r.settings.Load(); s.Exclusions.Len() > 0 || !s.TunnelOnly.FullTunnel() {
+		prefix, host, proto = sniffStream(c)
+	}
 	src := SourceNone
 	switch proto {
 	case sniff.TLS:

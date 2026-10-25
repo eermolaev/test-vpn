@@ -149,6 +149,33 @@ sudo testvpn uninstall           # keeps profiles
 sudo testvpn uninstall --purge   # deletes profiles and settings too
 ```
 
+## Speed
+
+What the client does:
+
+- the tunnel interface uses MTU 9000: traffic ends in the local stack, so
+  big packets just mean fewer system calls;
+- 4 MB TCP buffers that grow with the read rate and a 4096-packet queue, so
+  bursts are not dropped;
+- with no exclusions and VPN list `*`, connections skip the domain sniffing
+  step (it delayed protocols where the server speaks first, e.g. SMTP);
+- AmneziaWG profiles without an `MTU` use 1420 minus the S4 padding (it was
+  1280).
+
+If it is still slow:
+
+| Symptom | Likely cause | Try |
+| --- | --- | --- |
+| fast at first, then a connection stalls | the ISP throttles or freezes long TLS connections to foreign IPs | an XHTTP transport, or AmneziaWG |
+| everything is slow on VLESS, AWG is fine (or the other way) | the protocol is throttled | pin the faster transport (`p` → `t`) |
+| video/QUIC sites are slow on VLESS | QUIC is carried over TCP | Settings → "Block QUIC in VLESS" on, so browsers use TCP |
+| slow only on some networks | MTU on the path to the server | set `MTU = 1280` in the AmneziaWG profile |
+| speed tops out on AmneziaWG on long distances | its built-in TCP stack has a fixed 1 MB window (about 80 Mbit/s at 100 ms) | use VLESS for big downloads |
+| server is far away or loaded | latency and the server's uplink | a closer server |
+
+Compare with `testvpn disconnect` and the same speed test; the tunnel panel
+shows the current rate.
+
 ## Other VPN apps (Amnezia, V2Box, …)
 
 Disconnect other VPN apps before connecting and turn off their "connect on

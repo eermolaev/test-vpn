@@ -75,8 +75,12 @@ type Options struct {
 	TCPBufferSize int
 	// MaxInFlight bounds concurrent TCP handshakes.
 	MaxInFlight int
-	// QueueSize is the outbound packet queue length.
+	// QueueSize is the outbound packet queue length; packets beyond it are
+	// dropped, which TCP sees as loss.
 	QueueSize int
+	// ModerateReceiveBuffer lets TCP grow its receive window with the
+	// application's read rate, up to TCPBufferSize.
+	ModerateReceiveBuffer bool
 }
 
 func (o *Options) defaults() {
@@ -137,6 +141,10 @@ func New(pio PacketIO, h Handler, opts Options) (*Stack, error) {
 	s.SetTransportProtocolOption(tcp.ProtocolNumber, &rcv)
 	snd := tcpip.TCPSendBufferSizeRangeOption{Min: 4096, Default: opts.TCPBufferSize, Max: opts.TCPBufferSize}
 	s.SetTransportProtocolOption(tcp.ProtocolNumber, &snd)
+	if opts.ModerateReceiveBuffer {
+		mod := tcpip.TCPModerateReceiveBufferOption(true)
+		s.SetTransportProtocolOption(tcp.ProtocolNumber, &mod)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	st := &Stack{s: s, ep: ep, io: pio, h: h, ctx: ctx, cancel: cancel, mtu: opts.MTU}

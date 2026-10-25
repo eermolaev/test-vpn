@@ -14,6 +14,7 @@ import (
 	"github.com/eermolaev/test-vpn/core/errclass"
 	"github.com/eermolaev/test-vpn/core/fallback"
 	"github.com/eermolaev/test-vpn/core/flowrouter"
+	"github.com/eermolaev/test-vpn/core/netstack"
 	"github.com/eermolaev/test-vpn/core/profile"
 	"github.com/eermolaev/test-vpn/core/rules"
 )
@@ -49,6 +50,10 @@ type Config struct {
 	InterfaceName   string           `json:"interfaceName,omitempty"`
 	MTU             int              `json:"mtu,omitempty"`
 	Settings
+
+	// Stack tunes the userspace TCP/IP stack; the zero value keeps the
+	// memory-saving defaults needed on iOS (PLAT-002).
+	Stack netstack.Options `json:"-"`
 
 	Policy         fallback.Policy `json:"-"`
 	HealthInterval time.Duration   `json:"-"`

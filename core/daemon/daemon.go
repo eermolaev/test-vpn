@@ -16,6 +16,7 @@ import (
 	"github.com/eermolaev/test-vpn/core/direct"
 	"github.com/eermolaev/test-vpn/core/engine"
 	"github.com/eermolaev/test-vpn/core/fallback"
+	"github.com/eermolaev/test-vpn/core/netstack"
 	"github.com/eermolaev/test-vpn/core/platform"
 	"github.com/eermolaev/test-vpn/core/profile"
 	"github.com/eermolaev/test-vpn/core/tunnel"
@@ -23,6 +24,9 @@ import (
 
 // Version of the daemon.
 const Version = "0.1.0"
+
+// DefaultMTU of the tunnel interface on macOS.
+const DefaultMTU = 9000
 
 // Options configure the daemon.
 type Options struct {
@@ -72,7 +76,9 @@ type Daemon struct {
 // New opens the state directory.
 func New(opts Options) (*Daemon, error) {
 	if opts.MTU == 0 {
-		opts.MTU = 1400
+		// Traffic is terminated locally, so the utun MTU is not limited by
+		// the path: large packets mean fewer syscalls and per-packet work.
+		opts.MTU = DefaultMTU
 	}
 	if opts.MonitorInterval == 0 {
 		opts.MonitorInterval = 2 * time.Second
@@ -340,6 +346,9 @@ func (d *Daemon) connectLocked(sp storedProfile, s Settings) error {
 		InterfaceName:   route.Interface,
 		MTU:             d.opts.MTU,
 		Settings:        tunnelSettings(s),
+		// A Mac has memory to spare: larger buffers and queue avoid drops
+		// and window stalls at high speed.
+		Stack: netstack.Options{TCPBufferSize: 4 << 20, QueueSize: 4096, ModerateReceiveBuffer: true},
 	}
 	if d.opts.TunePolicy != nil {
 		d.opts.TunePolicy(&cfg)

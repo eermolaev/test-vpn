@@ -23,8 +23,9 @@ import (
 	"github.com/eermolaev/test-vpn/core/profile"
 )
 
-// DefaultMTU is used when the profile has none.
-const DefaultMTU = 1280
+// DefaultMTU is used when the profile has none: the WireGuard default,
+// minus AmneziaWG transport padding (S4) so packets still fit in 1500.
+const DefaultMTU = 1420
 
 // Options configure the engine.
 type Options struct {
@@ -140,7 +141,7 @@ func Start(ctx context.Context, c *profile.AWGConfig, opts Options) (*Engine, er
 	}
 	mtu := c.MTU
 	if mtu == 0 {
-		mtu = DefaultMTU
+		mtu = max(DefaultMTU-c.S4, 1280)
 	}
 	tunDev, tnet, err := netstack.CreateNetTUN(local, nil, mtu)
 	if err != nil {
