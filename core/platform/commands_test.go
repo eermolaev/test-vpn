@@ -92,3 +92,18 @@ func TestScutil(t *testing.T) {
 		t.Fatal("token")
 	}
 }
+
+func TestConflictParsers(t *testing.T) {
+	nc := `Available network connection services in the current set (*=enabled):
+* (Connected)      7A3B1C2D-0000-0000-0000-000000000001 VPN (com.amnezia.AmneziaVPN.network-extension) "AmneziaVPN"                     [VPN/com.amnezia.AmneziaVPN.network-extension]
+* (Disconnected)   7A3B1C2D-0000-0000-0000-000000000002 VPN (net.v2box.V2Box.PacketTunnel) "V2Box"                                     [VPN/net.v2box.V2Box.PacketTunnel]
+  (Connecting)     7A3B1C2D-0000-0000-0000-000000000003 VPN (com.example) "Other"   [VPN/com.example]
+`
+	got := ParseNCList(nc)
+	if len(got) != 2 || got[0] != `VPN "AmneziaVPN" is connected` || got[1] != `VPN "Other" is connecting` {
+		t.Fatalf("%q", got)
+	}
+	if a := ParsePFAnchors("  com.apple\n  amn\n"); len(a) != 1 || a[0] != "amn" {
+		t.Fatalf("%q", a)
+	}
+}

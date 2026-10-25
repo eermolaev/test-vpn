@@ -21,6 +21,8 @@ type Fake struct {
 	dns      []netip.Addr
 	servers  []netip.Addr
 	OnCreate func(app *netstack.PipeIO) // called when the tunnel is created
+	// ConflictList is returned by Conflicts.
+	ConflictList []string
 }
 
 // NewFake returns a fake with a default route on en0.
@@ -160,4 +162,10 @@ func (f *Fake) DNS() []netip.Addr {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]netip.Addr(nil), f.dns...)
+}
+
+func (f *Fake) Conflicts(string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.ConflictList...)
 }

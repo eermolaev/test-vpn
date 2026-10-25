@@ -62,4 +62,8 @@ type Platform interface {
 	AllowDirect(ips ...netip.Addr) error
 	// DisableKillSwitch removes the filter rules.
 	DisableKillSwitch() error
+	// Conflicts describes other VPNs or firewalls that can capture or block
+	// the daemon's traffic (another VPN app connected, foreign tunnel
+	// routes, other pf anchors). ownTun is excluded.
+	Conflicts(ownTun string) []string
 }

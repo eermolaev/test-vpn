@@ -347,8 +347,10 @@ func TestHealthCheckFallsBackToTCP(t *testing.T) {
 		Settings: Settings{DNSServers: []string{dns.String()}},
 		Policy:   fastPolicy(),
 	}, Deps{
-		Starter: func(context.Context, profile.Transport) (engine.Engine, error) { return tcpOnlyEngine{dnsTCP: dns}, nil },
-		Logf:    func(s string) { mu.Lock(); logs = append(logs, s); mu.Unlock() },
+		Starter: func(context.Context, profile.Transport) (engine.Engine, error) {
+			return tcpOnlyEngine{dnsTCP: dns}, nil
+		},
+		Logf: func(s string) { mu.Lock(); logs = append(logs, s); mu.Unlock() },
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -98,6 +98,21 @@ sudo testvpn uninstall           # keeps profiles
 sudo testvpn uninstall --purge   # deletes profiles and settings too
 ```
 
+## Other VPN apps (Amnezia, V2Box, …)
+
+Disconnect other VPN apps before connecting and turn off their "connect on
+demand"/"always on". A connected VPN — especially one using the Network
+Extension "include all networks" mode — captures the service's own
+connections to your server, which then time out. The service detects
+connected VPN configurations (`scutil --nc list`), foreign tunnel default
+routes and other pf anchors, and shows them as warnings in the dashboard,
+in `testvpn status` and in the log.
+
+```sh
+scutil --nc list | grep Connected     # must print nothing
+netstat -rn -f inet | grep utun       # only the TestVPN utun may hold 0/1 and 128/1
+```
+
 ## Limitations
 
 - If DNS servers are set manually in System Settings → Network for the

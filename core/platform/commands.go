@@ -151,3 +151,47 @@ func ParsePFToken(out string) string {
 
 // ServiceDNSKey is the dynamic store key with the DNS of a service.
 func ServiceDNSKey(service string) string { return "State:/Network/Service/" + service + "/DNS" }
+
+// ParseNCList returns the VPN configurations that are connected or
+// connecting, from `scutil --nc list` output, e.g.
+//
+//   - (Connected)  7A3B... VPN (com.amnezia.AmneziaVPN.network-extension) "AmneziaVPN"  [VPN/...]
+func ParseNCList(out string) []string {
+	var active []string
+	for _, line := range strings.Split(out, "\n") {
+		open := strings.Index(line, "(")
+		closeIdx := strings.Index(line, ")")
+		if open < 0 || closeIdx < open {
+			continue
+		}
+		status := line[open+1 : closeIdx]
+		if status != "Connected" && status != "Connecting" && status != "Reasserting" {
+			continue
+		}
+		name := ""
+		if q1 := strings.Index(line, "\""); q1 >= 0 {
+			if q2 := strings.Index(line[q1+1:], "\""); q2 >= 0 {
+				name = line[q1+1 : q1+1+q2]
+			}
+		}
+		if name == "" {
+			name = strings.TrimSpace(line[closeIdx+1:])
+		}
+		active = append(active, fmt.Sprintf("VPN %q is %s", name, strings.ToLower(status)))
+	}
+	return active
+}
+
+// ParsePFAnchors returns top-level anchors other than Apple's and ours from
+// `pfctl -s Anchors` output.
+func ParsePFAnchors(out string) []string {
+	var other []string
+	for _, line := range strings.Split(out, "\n") {
+		a := strings.TrimSpace(line)
+		if a == "" || strings.HasPrefix(a, "com.apple") {
+			continue
+		}
+		other = append(other, a)
+	}
+	return other
+}

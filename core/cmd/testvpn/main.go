@@ -154,6 +154,9 @@ func printStatus(c *ipc.Client) error {
 	if st.LastError != "" {
 		fmt.Printf("error:       %s\n", st.LastError)
 	}
+	for _, w := range st.Warnings {
+		fmt.Printf("warning:     %s\n", w)
+	}
 	return nil
 }
 

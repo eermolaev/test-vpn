@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,6 +55,7 @@ type Daemon struct {
 	ksOn      bool
 	stopMon   context.CancelFunc
 	profileID string
+	warnings  []string
 }
 
 // New opens the state directory.
@@ -233,6 +235,7 @@ func (d *Daemon) Connect(id string) error {
 }
 
 func (d *Daemon) connectLocked(sp storedProfile, s Settings) error {
+	d.checkConflictsLocked("")
 	route, err := d.plat.DefaultRoute()
 	if err != nil {
 		route = platform.DefaultRoute{}
@@ -337,10 +340,24 @@ func (d *Daemon) teardownLocked(unblock bool) {
 	}
 }
 
+// checkConflictsLocked records and logs other VPNs/firewalls. Another VPN
+// that is connected captures the daemon's own traffic to the servers, so
+// connections time out; this is the most common cause of failures.
+func (d *Daemon) checkConflictsLocked(ownTun string) {
+	w := d.plat.Conflicts(ownTun)
+	if strings.Join(w, "\n") != strings.Join(d.warnings, "\n") {
+		for _, x := range w {
+			d.logf("warning: %s", x)
+		}
+	}
+	d.warnings = w
+}
+
 // monitor follows network changes (SEC-NET-005) and keeps the DNS override.
 func (d *Daemon) monitor(ctx context.Context, s Settings) {
 	t := time.NewTicker(d.opts.MonitorInterval)
 	defer t.Stop()
+	ticks := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -368,6 +385,9 @@ func (d *Daemon) monitor(ctx context.Context, s Settings) {
 			d.tun.NetworkChanged(route.Interface+"|"+route.Gateway.String(), route.Index, route.Interface)
 		}
 		d.plat.SetDNS(toAddrs(dnsServers(cur)))
+		if ticks++; ticks%15 == 0 {
+			d.checkConflictsLocked(d.tunName)
+		}
 		d.mu.Unlock()
 	}
 }
@@ -415,7 +435,7 @@ func (d *Daemon) Status() Status {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	v := d.st.view()
-	st := Status{Version: Version, Connected: v.Connected, KillSwitch: d.ksOn, Interface: d.tunName, Route: d.route, Since: d.since, LastError: d.lastErr, DNSServers: dnsServers(v.Settings)}
+	st := Status{Version: Version, Connected: v.Connected, KillSwitch: d.ksOn, Interface: d.tunName, Route: d.route, Since: d.since, LastError: d.lastErr, DNSServers: dnsServers(v.Settings), Warnings: d.warnings}
 	if sp, ok := d.profileByID(""); ok {
 		e := entry(sp, v.Selected)
 		st.Profile = &e

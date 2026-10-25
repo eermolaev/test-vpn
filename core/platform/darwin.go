@@ -395,3 +395,56 @@ func Unblock(statePath string, run Runner) error {
 	d.saveLocked()
 	return err
 }
+
+// Conflicts reports other VPNs and firewalls that would capture or block the
+// daemon's traffic to the VPN servers.
+func (d *Darwin) Conflicts(ownTun string) []string {
+	var out []string
+	if nc, err := d.run("", "scutil", "--nc", "list"); err == nil {
+		out = append(out, ParseNCList(nc)...)
+	}
+	for _, ifc := range foreignTunnelRoutes(ownTun) {
+		out = append(out, "another tunnel ("+ifc+") routes traffic; disconnect other VPN apps")
+	}
+	if a, err := d.run("", "pfctl", "-s", "Anchors"); err == nil {
+		for _, name := range ParsePFAnchors(a) {
+			out = append(out, "another firewall anchor is loaded: "+name)
+		}
+	}
+	return out
+}
+
+// foreignTunnelRoutes lists utun interfaces other than own that carry a
+// default or split-default (0/1, 128/1) IPv4 route.
+func foreignTunnelRoutes(own string) []string {
+	rib, err := route.FetchRIB(unix.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return nil
+	}
+	msgs, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range msgs {
+		rm, ok := m.(*route.RouteMessage)
+		if !ok || rm.Flags&unix.RTF_IFSCOPE != 0 || len(rm.Addrs) <= unix.RTAX_NETMASK {
+			continue
+		}
+		dst, ok := rm.Addrs[unix.RTAX_DST].(*route.Inet4Addr)
+		if !ok || (dst.IP != [4]byte{} && dst.IP != [4]byte{128, 0, 0, 0}) {
+			continue
+		}
+		if mask, ok := rm.Addrs[unix.RTAX_NETMASK].(*route.Inet4Addr); ok && mask.IP != [4]byte{} && mask.IP != [4]byte{128, 0, 0, 0} {
+			continue
+		}
+		ifc, err := net.InterfaceByIndex(rm.Index)
+		if err != nil || !strings.HasPrefix(ifc.Name, "utun") || ifc.Name == own || seen[ifc.Name] {
+			continue
+		}
+		seen[ifc.Name] = true
+		out = append(out, ifc.Name)
+	}
+	return out
+}

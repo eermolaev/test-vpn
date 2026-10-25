@@ -183,6 +183,15 @@ func (m *Model) exitPanel(w, h int) string {
 	if st.LastError != "" {
 		lines = append(lines, "  "+stBad.Render(st.LastError))
 	}
+	for _, wmsg := range st.Warnings {
+		for i, l := range wrap(wmsg, w-6) {
+			prefix := "⚠ "
+			if i > 0 {
+				prefix = "  "
+			}
+			lines = append(lines, stWarn.Render(prefix+l))
+		}
+	}
 	add("dns", strings.Join(st.DNSServers, ", "))
 	add("excluded", plural(len(m.settings.Exclusions), "domain"))
 	if st.Route.Interface != "" {

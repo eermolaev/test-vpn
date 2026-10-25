@@ -225,3 +225,28 @@ func TestProfileManagement(t *testing.T) {
 		t.Fatalf("after delete: %+v", list)
 	}
 }
+
+func TestConflictWarnings(t *testing.T) {
+	srv := testenv.StartAWG(t, testenv.Obfuscation(), [4]byte{1, 2, 3, 4})
+	e := startDaemon(t, t.TempDir())
+	e.plat.ConflictList = []string{`VPN "AmneziaVPN" is connected`}
+	e.cl.Call(CmdImport, ImportArgs{Text: profile.FormatAWGConf(srv.Client)}, nil)
+	e.cl.Call(CmdSetSettings, Settings{DNSServers: []string{testenv.AWGServerIP.String()}}, nil)
+	if err := e.cl.Call(CmdConnect, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	var st Status
+	e.cl.Call(CmdStatus, nil, &st)
+	if len(st.Warnings) != 1 || !strings.Contains(st.Warnings[0], "AmneziaVPN") {
+		t.Fatalf("warnings: %v", st.Warnings)
+	}
+	var logs []LogLine
+	e.cl.Call(CmdLogs, LogsArgs{}, &logs)
+	found := false
+	for _, l := range logs {
+		found = found || strings.Contains(l.Text, "warning: VPN \"AmneziaVPN\"")
+	}
+	if !found {
+		t.Fatal("conflict not logged")
+	}
+}

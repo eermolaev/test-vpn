@@ -64,7 +64,9 @@ type Status struct {
 	Route      platform.DefaultRoute `json:"route"`
 	Since      time.Time             `json:"since,omitzero"`
 	LastError  string                `json:"lastError,omitempty"`
-	DNSServers []string              `json:"dnsServers"`
+	// Warnings are conflicts with other VPNs or firewalls.
+	Warnings   []string `json:"warnings,omitempty"`
+	DNSServers []string `json:"dnsServers"`
 }
 
 // LogLine is a redacted log entry.
