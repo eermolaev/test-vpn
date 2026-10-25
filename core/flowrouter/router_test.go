@@ -2,9 +2,11 @@ package flowrouter
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -267,32 +269,81 @@ func TestKillSwitch(t *testing.T) {
 	}
 }
 
+// expectRST dials dst and checks that the router answered with RST rather
+// than dropping the SYN. A silent drop would end in a dial timeout (3s); an
+// RST to a retransmitted SYN arrives after the 1s SYN RTO, which still counts
+// as a reset, so the bound is below the dial timeout, not below the RTO.
+func expectRST(t *testing.T, h *harness, dst string) {
+	t.Helper()
+	start := time.Now()
+	_, err := h.client.DialTCP(netip.MustParseAddrPort(dst), 3*time.Second)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatalf("connect to %s must fail", dst)
+	}
+	syns := h.rejectsFor(dst)
+	// Diagnostics: syns=2 means the first RST was lost on the client side,
+	// syns=1 after ~1s means the first SYN never reached the router.
+	t.Logf("reject %s: %v after %v, router saw %d SYN(s)", dst, err, elapsed.Round(time.Millisecond), syns)
+	if !strings.Contains(err.Error(), "refused") && !strings.Contains(err.Error(), "reset") {
+		t.Fatalf("expected connection refused/reset (RST), got %v", err)
+	}
+	if elapsed > 2500*time.Millisecond {
+		t.Fatalf("reject took %v: SYN dropped instead of reset", elapsed)
+	}
+	if syns == 0 {
+		t.Fatal("router never saw the SYN")
+	}
+}
+
+func (h *harness) rejectsFor(dst string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, l := range h.log {
+		if strings.HasPrefix(l, "tcp "+dst+" reject") {
+			n++
+		}
+	}
+	return n
+}
+
 func TestNoExclusionsRejectsBeforeHandshake(t *testing.T) {
 	h := newHarness(t, nil, nil)
-	start := time.Now()
-	if _, err := h.client.DialTCP(netip.MustParseAddrPort("198.51.100.10:443"), 3*time.Second); err == nil {
-		t.Fatal("connect must fail while tunnel is down")
-	}
-	if time.Since(start) > time.Second {
-		t.Fatal("reject must be immediate (RST)")
-	}
+	expectRST(t, h, "198.51.100.10:443")
 }
 
 func TestIPv6Rejected(t *testing.T) {
 	h := newHarness(t, []string{"bank.example"}, nil)
 	h.router.SetEngine(h.tunnel)
-	start := time.Now()
-	if _, err := h.client.DialTCP(netip.MustParseAddrPort("[2001:db8::1]:443"), 3*time.Second); err == nil {
-		t.Fatal("IPv6 connect must fail")
-	}
-	if time.Since(start) > time.Second {
-		t.Fatal("IPv6 reject must be immediate")
-	}
+	expectRST(t, h, "[2001:db8::1]:443")
 	if _, err := h.udp(t, "[2001:db8::1]:443", []byte("x")); err == nil {
 		t.Fatal("IPv6 UDP must get no answer")
 	}
 	if len(h.direct.dsts)+len(h.tunnel.dsts) != 0 {
 		t.Fatal("IPv6 flow reached a dialer")
+	}
+}
+
+// TestConnectLatency guards against the stack losing the first SYN of
+// accepted connections, which would add the 1s SYN RTO to every connection.
+func TestConnectLatency(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	h.router.SetEngine(h.tunnel)
+	var d []time.Duration
+	for i := 0; i < 20; i++ {
+		start := time.Now()
+		c, err := h.client.DialTCP(netip.MustParseAddrPort(fmt.Sprintf("198.51.100.40:%d", 1000+i)), 3*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d = append(d, time.Since(start))
+		c.Close()
+	}
+	sort.Slice(d, func(i, j int) bool { return d[i] < d[j] })
+	t.Logf("connect latency: median %v, max %v", d[len(d)/2], d[len(d)-1])
+	if d[len(d)/2] > 200*time.Millisecond {
+		t.Fatalf("median connect latency %v: the first SYN is being lost", d[len(d)/2])
 	}
 }
 
