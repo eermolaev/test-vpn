@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 
 	"github.com/eermolaev/test-vpn/core/errclass"
@@ -139,7 +140,24 @@ func Start(c *profile.VLESSConfig, logf func(string)) (*Engine, error) {
 
 type logHandler func(string)
 
-func (h logHandler) Handle(msg log.Message) { h(msg.String()) }
+// Handle forwards errors and warnings, plus informational messages about
+// failures (dial errors are logged at info level). Debug output and the
+// per-connection chatter are dropped.
+func (h logHandler) Handle(msg log.Message) {
+	text := msg.String()
+	if gm, ok := msg.(*log.GeneralMessage); ok {
+		switch {
+		case gm.Severity == log.Severity_Debug:
+			return
+		case gm.Severity == log.Severity_Info:
+			l := strings.ToLower(text)
+			if !strings.Contains(l, "fail") && !strings.Contains(l, "error") && !strings.Contains(l, "reality") {
+				return
+			}
+		}
+	}
+	h("xray: " + text)
+}
 
 func dest(network xnet.Network, dst netip.AddrPort) xnet.Destination {
 	return xnet.Destination{

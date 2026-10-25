@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"sync"
@@ -50,12 +51,13 @@ type Tunnel struct {
 	wakeCh chan struct{}
 	done   chan struct{}
 
-	mu       sync.Mutex
-	status   Status
-	eng      engine.Engine
-	netKey   string
-	dnsShown []string
-	dnsAddrs []netip.AddrPort // tunnel resolvers, also used for health checks
+	mu        sync.Mutex
+	status    Status
+	eng       engine.Engine
+	netKey    string
+	dnsShown  []string
+	dnsAddrs  []netip.AddrPort // tunnel resolvers, also used for health checks
+	udpWarned engine.Engine
 }
 
 // Start validates cfg, starts the stack with the kill switch active, and
@@ -302,7 +304,7 @@ func (t *Tunnel) connect() (engine.Engine, error) {
 		if err != nil {
 			lastErr = err
 			c := errclass.Classify(err)
-			t.logf("%s failed: %s: %v", tr.ID(), c, err)
+			t.logf("%s failed: %v", tr.ID(), err)
 			t.setStatus(func(s *Status) { s.ErrorClass, s.ErrorMessage = c, c.Message() })
 			continue
 		}
@@ -385,22 +387,54 @@ func (t *Tunnel) monitor(e engine.Engine) {
 	}
 }
 
-// healthCheck sends a DNS query through the engine to the tunnel resolver.
-// Any well-formed answer proves that traffic passes the tunnel.
+// healthCheck sends a DNS query through the engine to the tunnel resolvers,
+// first over UDP and then over TCP: some VLESS servers do not relay UDP, and
+// TCP-only operation is still a working tunnel. Each attempt gets its own
+// share of the time budget. Any well-formed answer proves that traffic
+// passes the tunnel.
 func (t *Tunnel) healthCheck(ctx context.Context, e engine.Engine) error {
 	servers := t.resolverServers()
 	if len(servers) == 0 {
 		return errors.New("no DNS servers for health check")
 	}
+	budget := t.cfg.HealthTimeout
+	if dl, ok := ctx.Deadline(); ok {
+		budget = time.Until(dl)
+	}
+	slice := max(budget/time.Duration(2*len(servers)), time.Second)
 	var lastErr error
+	udpFailed := false
 	for _, s := range servers {
-		if err := dnsProbe(ctx, e, s); err != nil {
-			lastErr = err
-			continue
+		for _, network := range []string{"udp", "tcp"} {
+			if ctx.Err() != nil {
+				break
+			}
+			pctx, cancel := context.WithTimeout(ctx, slice)
+			err := dnsProbe(pctx, e, network, s)
+			cancel()
+			if err == nil {
+				if network == "tcp" && udpFailed {
+					t.warnUDPOnce(e)
+				}
+				return nil
+			}
+			if network == "udp" {
+				udpFailed = true
+			}
+			lastErr = fmt.Errorf("dns %s %s: %w", network, s, err)
 		}
-		return nil
 	}
 	return errclass.Wrap(errclass.Routing, lastErr)
+}
+
+func (t *Tunnel) warnUDPOnce(e engine.Engine) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.udpWarned == e {
+		return
+	}
+	t.udpWarned = e
+	t.logf("UDP does not pass through the server (TCP works): DNS uses TCP, UDP apps and QUIC will fail")
 }
 
 func (t *Tunnel) resolverServers() []netip.AddrPort {
@@ -411,8 +445,14 @@ func (t *Tunnel) resolverServers() []netip.AddrPort {
 
 var probeName = dnsmessage.MustNewName("example.com.")
 
-func dnsProbe(ctx context.Context, e engine.Engine, server netip.AddrPort) error {
-	c, err := e.DialUDP(ctx, server)
+func dnsProbe(ctx context.Context, e engine.Engine, network string, server netip.AddrPort) error {
+	var c net.Conn
+	var err error
+	if network == "tcp" {
+		c, err = e.DialTCP(ctx, server)
+	} else {
+		c, err = e.DialUDP(ctx, server)
+	}
 	if err != nil {
 		return err
 	}
@@ -429,12 +469,26 @@ func dnsProbe(ctx context.Context, e engine.Engine, server netip.AddrPort) error
 	b.StartQuestions()
 	b.Question(dnsmessage.Question{Name: probeName, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET})
 	q, _ := b.Finish()
+	if network == "tcp" {
+		q = append([]byte{byte(len(q) >> 8), byte(len(q))}, q...)
+	}
 	if _, err := c.Write(q); err != nil {
 		return err
 	}
-	buf := make([]byte, 1500)
+	buf := make([]byte, 4096)
 	for {
-		n, err := c.Read(buf)
+		var msg []byte
+		if network == "tcp" {
+			var l [2]byte
+			if _, err = io.ReadFull(c, l[:]); err == nil {
+				msg = make([]byte, int(l[0])<<8|int(l[1]))
+				_, err = io.ReadFull(c, msg)
+			}
+		} else {
+			var n int
+			n, err = c.Read(buf)
+			msg = buf[:n]
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -442,7 +496,7 @@ func dnsProbe(ctx context.Context, e engine.Engine, server netip.AddrPort) error
 			return err
 		}
 		var p dnsmessage.Parser
-		if h, err := p.Start(buf[:n]); err == nil && h.ID == id && h.Response {
+		if h, err := p.Start(msg); err == nil && h.ID == id && h.Response {
 			return nil
 		}
 	}

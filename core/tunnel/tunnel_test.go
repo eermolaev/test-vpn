@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/netip"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/eermolaev/test-vpn/core/engine"
 	"github.com/eermolaev/test-vpn/core/engine/xray"
 	"github.com/eermolaev/test-vpn/core/errclass"
 	"github.com/eermolaev/test-vpn/core/fallback"
@@ -275,5 +277,117 @@ func TestStartValidation(t *testing.T) {
 	plain := &profile.Profile{Transports: []profile.Transport{{VLESS: &profile.VLESSConfig{Address: "h", Port: 80, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Security: "none"}}}}
 	if _, err := Start(tunEnd, Config{Profile: plain}, Deps{}); errclass.Classify(err) != errclass.Config {
 		t.Fatalf("forbidden-only profile: %v", err)
+	}
+}
+
+// tcpOnlyEngine relays TCP but silently drops UDP, like a VLESS server
+// that does not relay UDP.
+type tcpOnlyEngine struct{ dnsTCP netip.AddrPort }
+
+func (e tcpOnlyEngine) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, "tcp4", e.dnsTCP.String()) // every TCP flow reaches the DNS server
+}
+func (tcpOnlyEngine) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
+	c1, c2 := net.Pipe() // writes vanish, reads block
+	go io.Copy(io.Discard, c2)
+	return c1, nil
+}
+func (tcpOnlyEngine) Name() string    { return "vless-reality" }
+func (tcpOnlyEngine) NativeUDP() bool { return false }
+func (tcpOnlyEngine) Close() error    { return nil }
+
+// startTCPDNS serves DNS over TCP (RFC 7766) answering every query.
+func startTCPDNS(t *testing.T) netip.AddrPort {
+	t.Helper()
+	l, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				var lb [2]byte
+				if _, err := io.ReadFull(c, lb[:]); err != nil {
+					return
+				}
+				q := make([]byte, int(lb[0])<<8|int(lb[1]))
+				io.ReadFull(c, q)
+				var p dnsmessage.Parser
+				h, err := p.Start(q)
+				if err != nil {
+					return
+				}
+				qs, _ := p.Question()
+				b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: h.ID, Response: true})
+				b.StartQuestions()
+				b.Question(qs)
+				out, _ := b.Finish()
+				c.Write(append([]byte{byte(len(out) >> 8), byte(len(out))}, out...))
+			}()
+		}
+	}()
+	return netip.MustParseAddrPort(l.Addr().String())
+}
+
+func TestHealthCheckFallsBackToTCP(t *testing.T) {
+	dns := startTCPDNS(t)
+	vless := &profile.VLESSConfig{Address: "203.0.113.10", Port: 443, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Security: "reality", Network: "raw", Flow: "xtls-rprx-vision", SNI: "a.example", PublicKey: "k", ShortID: "ab"}
+	var logs []string
+	var mu sync.Mutex
+	tunEnd, _ := netstack.NewPipe(16)
+	tun, err := Start(tunEnd, Config{
+		Profile:  &profile.Profile{Transports: []profile.Transport{{VLESS: vless}}},
+		Settings: Settings{DNSServers: []string{dns.String()}},
+		Policy:   fastPolicy(),
+	}, Deps{
+		Starter: func(context.Context, profile.Transport) (engine.Engine, error) { return tcpOnlyEngine{dnsTCP: dns}, nil },
+		Logf:    func(s string) { mu.Lock(); logs = append(logs, s); mu.Unlock() },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tun.Stop()
+	waitState(t, tun, StateConnected, 10*time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, l := range logs {
+		if strings.Contains(l, "UDP does not pass") {
+			found = true
+		}
+		if strings.Contains(l, "routing: routing:") {
+			t.Fatalf("duplicated class in log: %q", l)
+		}
+	}
+	if !found {
+		t.Fatalf("UDP warning missing: %v", logs)
+	}
+}
+
+func TestUnreachableVLESSServerIsTCPError(t *testing.T) {
+	l, _ := net.Listen("tcp4", "127.0.0.1:0")
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close() // nothing listens: connection refused
+	vless := &profile.VLESSConfig{Address: "127.0.0.1", Port: port, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Security: "reality", Network: "raw", Flow: "xtls-rprx-vision", SNI: "a.example", PublicKey: "SbVKOEMjK0sIlbwg4akyBg5mL5KZwwB-ed4eEE7YnRc", ShortID: "ab"}
+	tunEnd, _ := netstack.NewPipe(16)
+	tun, err := Start(tunEnd, Config{
+		Profile:  &profile.Profile{Transports: []profile.Transport{{VLESS: vless}}},
+		Settings: Settings{DNSServers: []string{"127.0.0.1"}},
+		Policy:   fastPolicy(),
+	}, Deps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tun.Stop()
+	st := waitState(t, tun, StateFailed, 10*time.Second)
+	if st.ErrorClass != errclass.TCPReset {
+		t.Fatalf("class %q, want tcp_reset", st.ErrorClass)
 	}
 }
