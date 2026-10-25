@@ -1,13 +1,17 @@
 package daemon
 
 import (
+	"context"
+	"errors"
 	"io"
+	"net"
 	"net/netip"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/eermolaev/test-vpn/core/engine"
 	"github.com/eermolaev/test-vpn/core/fallback"
 	"github.com/eermolaev/test-vpn/core/internal/clientstack"
 	"github.com/eermolaev/test-vpn/core/internal/quictest"
@@ -28,12 +32,16 @@ type env struct {
 }
 
 func startDaemon(t *testing.T, dir string) *env {
+	return startDaemonWith(t, dir, nil)
+}
+
+func startDaemonWith(t *testing.T, dir string, directDialer engine.Dialer) *env {
 	t.Helper()
 	plat := platform.NewFake()
 	e := &env{plat: plat, client: make(chan *clientstack.Client, 4), dir: dir}
 	plat.OnCreate = func(app *netstack.PipeIO) { e.client <- clientstack.New(app) }
 	d, err := New(Options{
-		Dir: dir, Platform: plat, NoBind: true, MonitorInterval: 50 * time.Millisecond,
+		Dir: dir, Platform: plat, NoBind: true, MonitorInterval: 50 * time.Millisecond, DirectDialer: directDialer,
 		TunePolicy: func(c *tunnel.Config) {
 			c.Policy = fallback.Policy{Attempts: 1, FailTimeout: 3 * time.Second, BackoffBase: 10 * time.Millisecond, BackoffMax: 50 * time.Millisecond, MaxRounds: 1}
 		},
@@ -248,5 +256,41 @@ func TestConflictWarnings(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("conflict not logged")
+	}
+}
+
+type unreachableDialer struct{}
+
+func (unreachableDialer) DialTCP(context.Context, netip.AddrPort) (net.Conn, error) {
+	return nil, errors.New("connect: network is unreachable")
+}
+func (unreachableDialer) DialUDP(context.Context, netip.AddrPort) (net.Conn, error) {
+	return nil, errors.New("connect: network is unreachable")
+}
+
+// If the direct path does not work, excluded domains must keep working
+// through the tunnel instead of being reset.
+func TestBrokenDirectPathFallsBackToTunnel(t *testing.T) {
+	srv := testenv.StartAWG(t, testenv.Obfuscation(), [4]byte{1, 2, 3, 4})
+	e := startDaemonWith(t, t.TempDir(), unreachableDialer{})
+	e.cl.Call(CmdImport, ImportArgs{Text: profile.FormatAWGConf(srv.Client)}, nil)
+	e.cl.Call(CmdSetSettings, Settings{Exclusions: []string{"bank.example"}, DNSServers: []string{testenv.AWGServerIP.String()}}, nil)
+	if err := e.cl.Call(CmdConnect, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := e.waitConnected(t)
+	found := false
+	for _, w := range st.Warnings {
+		found = found || strings.Contains(w, "direct path is unreachable")
+	}
+	if !found {
+		t.Fatalf("warnings: %v", st.Warnings)
+	}
+	c := <-e.client
+	ch := quictest.ClientHello("www.bank.example")
+	tls := append([]byte{0x16, 3, 1, byte(len(ch) >> 8), byte(len(ch))}, ch...)
+	got := exchange(t, c, netip.AddrPortFrom(testenv.AWGServerIP, 7), tls)
+	if !strings.HasPrefix(got, "awg:") {
+		t.Fatal("excluded domain must go through the tunnel while the direct path is broken")
 	}
 }

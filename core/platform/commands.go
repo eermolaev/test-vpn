@@ -67,6 +67,17 @@ func ServerRouteCommand(add bool, server netip.Addr, gw netip.Addr) []string {
 	return []string{"route", "-q", "-n", "delete", "-inet", "-host", server.String()}
 }
 
+// ScopedDefaultCommand adds or deletes the interface-scoped default route.
+// Sockets bound with IP_BOUND_IF (direct connections for excluded domains)
+// only use routes scoped to their interface; without one they fail with
+// "network is unreachable".
+func ScopedDefaultCommand(add bool, gw netip.Addr, ifname string) []string {
+	if add {
+		return []string{"route", "-q", "-n", "add", "-inet", "default", gw.String(), "-ifscope", ifname}
+	}
+	return []string{"route", "-q", "-n", "delete", "-inet", "default", "-ifscope", ifname}
+}
+
 // DNSConfig is the resolver part of a network service in SystemConfiguration.
 type DNSConfig struct {
 	ServerAddresses []string `json:"serverAddresses,omitempty"`

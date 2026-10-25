@@ -40,6 +40,8 @@ type state struct {
 	DNSService   string     `json:"dnsService,omitempty"`
 	OrigDNS      *DNSConfig `json:"origDNS,omitempty"`
 	ServerRoutes []string   `json:"serverRoutes,omitempty"`
+	// ScopedRoute is the interface whose scoped default route we added.
+	ScopedRoute string `json:"scopedRoute,omitempty"`
 }
 
 // Darwin implements Platform on macOS. It must run as root.
@@ -191,12 +193,16 @@ func (d *Darwin) DefaultRoute() (DefaultRoute, error) {
 func (d *Darwin) SetServerRoutes(servers []netip.Addr, via DefaultRoute) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if servers == nil {
+		via = DefaultRoute{} // disconnect: also remove our scoped route
+	}
 	for _, s := range d.st.ServerRoutes {
 		if a, err := netip.ParseAddr(s); err == nil {
 			d.run("", "route", ServerRouteCommand(false, a, netip.Addr{})[1:]...)
 		}
 	}
 	d.st.ServerRoutes = nil
+	d.setScopedDefaultLocked(via)
 	var firstErr error
 	for _, s := range servers {
 		if !s.Is4() || !via.Gateway.IsValid() {
@@ -210,6 +216,26 @@ func (d *Darwin) SetServerRoutes(servers []netip.Addr, via DefaultRoute) error {
 	}
 	d.saveLocked()
 	return firstErr
+}
+
+// setScopedDefaultLocked makes sure sockets bound to the physical interface
+// have a route. An existing scoped route (configd usually installs one) is
+// left alone and not removed later; one we add is recorded in the state.
+func (d *Darwin) setScopedDefaultLocked(via DefaultRoute) {
+	if d.st.ScopedRoute != "" && d.st.ScopedRoute != via.Interface {
+		d.run("", "route", ScopedDefaultCommand(false, netip.Addr{}, d.st.ScopedRoute)[1:]...)
+		d.st.ScopedRoute = ""
+	}
+	if via.Interface == "" || !via.Gateway.IsValid() || d.st.ScopedRoute == via.Interface {
+		return
+	}
+	out, err := d.run("", "route", ScopedDefaultCommand(true, via.Gateway, via.Interface)[1:]...)
+	if err == nil {
+		d.st.ScopedRoute = via.Interface
+	} else if !strings.Contains(out+err.Error(), "File exists") {
+		// Not fatal: the daemon's direct-path check reports the problem.
+		return
+	}
 }
 
 func (d *Darwin) scutil(script string) (string, error) { return d.run(script, "scutil") }
@@ -392,6 +418,10 @@ func Unblock(statePath string, run Runner) error {
 		}
 	}
 	d.st.ServerRoutes = nil
+	if d.st.ScopedRoute != "" {
+		d.run("", "route", ScopedDefaultCommand(false, netip.Addr{}, d.st.ScopedRoute)[1:]...)
+		d.st.ScopedRoute = ""
+	}
 	d.saveLocked()
 	return err
 }

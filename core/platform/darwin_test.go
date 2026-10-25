@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"errors"
 	"net/netip"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,8 @@ func (f *fakeRunner) run(stdin, name string, args ...string) (string, error) {
 		}
 		f.dns[key] = out + "  }\n}\n"
 		f.cmds[len(f.cmds)-1] += " <" + strings.Join(addrs, ",") + ">"
+	case name == "route" && strings.Contains(cmd, "-ifscope en1") && strings.Contains(cmd, " add "):
+		return "add net default: gateway 10.0.0.1: File exists", errors.New("exit status 1")
 	case name == "pfctl" && len(args) > 0 && args[0] == "-sr":
 		return `anchor "com.apple/*" all`, nil
 	case name == "pfctl" && len(args) > 0 && args[0] == "-E":
@@ -77,7 +80,7 @@ func TestDarwinLifecycle(t *testing.T) {
 	if err := d.SetDNS(dns); err != nil { // idempotent
 		t.Fatal(err)
 	}
-	if err := d.SetServerRoutes([]netip.Addr{netip.MustParseAddr("203.0.113.10")}, DefaultRoute{Gateway: netip.MustParseAddr("192.168.1.1")}); err != nil {
+	if err := d.SetServerRoutes([]netip.Addr{netip.MustParseAddr("203.0.113.10")}, DefaultRoute{Gateway: netip.MustParseAddr("192.168.1.1"), Interface: "en0", Index: 4}); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(r.cmds, "\n")
@@ -93,9 +96,24 @@ func TestDarwinLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined = strings.Join(r.cmds, "\n")
-	for _, want := range []string{"pfctl -a " + Anchor + " -F all", "pfctl -X 42", "<192.168.1.1,fe80::1%en0>", "route -q -n delete -inet -host 203.0.113.10"} {
+	for _, want := range []string{"pfctl -a " + Anchor + " -F all", "pfctl -X 42", "route -q -n delete -inet default -ifscope en0", "<192.168.1.1,fe80::1%en0>", "route -q -n delete -inet -host 203.0.113.10"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("unblock missing %q:\n%s", want, joined)
 		}
+	}
+}
+
+func TestScopedRouteExisting(t *testing.T) {
+	r := newFakeRunner()
+	d := NewDarwin(filepath.Join(t.TempDir(), "s.json"), r.run)
+	via := DefaultRoute{Gateway: netip.MustParseAddr("10.0.0.1"), Interface: "en1", Index: 5}
+	d.SetServerRoutes([]netip.Addr{netip.MustParseAddr("203.0.113.10")}, via)
+	if d.st.ScopedRoute != "" {
+		t.Fatal("an existing scoped route must not be recorded as ours")
+	}
+	r.cmds = nil
+	d.SetServerRoutes(nil, DefaultRoute{})
+	if strings.Contains(strings.Join(r.cmds, "\n"), "-ifscope en1") {
+		t.Fatal("must not delete a scoped route we did not add")
 	}
 }

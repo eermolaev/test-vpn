@@ -33,6 +33,8 @@ type Options struct {
 	MonitorInterval time.Duration
 	// NoBind disables binding direct sockets to the physical interface (tests).
 	NoBind bool
+	// DirectDialer overrides the dialer for direct connections (tests).
+	DirectDialer engine.Dialer
 	// LogWriter also receives log lines (the launchd log file).
 	LogWriter io.Writer
 	// Tunnel overrides tunnel timing (tests).
@@ -59,6 +61,9 @@ type Daemon struct {
 	stopMon   context.CancelFunc
 	profileID string
 	warnings  []string
+	// directBroken is set when sockets bound to the physical interface
+	// cannot reach the network; excluded domains then use the tunnel.
+	directBroken error
 }
 
 // New opens the state directory.
@@ -186,7 +191,7 @@ func (d *Daemon) pinServers(p *profile.Profile, s Settings) ([]netip.Addr, error
 	for _, a := range toAddrs(dnsServers(s)) {
 		dns = append(dns, netip.AddrPortFrom(a, 53))
 	}
-	resolver := allowDialer{plat: d.plat, d: d.dial}
+	resolver := allowDialer{plat: d.plat, d: d.directDialer()}
 	seen := map[netip.Addr]bool{}
 	var servers []netip.Addr
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -309,7 +314,7 @@ func (d *Daemon) connectLocked(sp storedProfile, s Settings) error {
 	t, err := tunnel.Start(pio, cfg, tunnel.Deps{
 		Memory: d.mem,
 		Logf:   d.log,
-		Direct: allowDialer{plat: d.plat, d: d.dial},
+		Direct: allowDialer{plat: d.plat, d: d.directDialer()},
 	})
 	if err != nil {
 		pio.Close()
@@ -320,6 +325,7 @@ func (d *Daemon) connectLocked(sp storedProfile, s Settings) error {
 	d.stopMon = cancel
 	go d.monitor(ctx, s)
 	d.logf("tunnel started on %s", name)
+	d.checkDirectLocked(s)
 	return nil
 }
 
@@ -334,6 +340,7 @@ func (d *Daemon) Disconnect() error {
 }
 
 func (d *Daemon) teardownLocked(unblock bool) {
+	d.directBroken = nil
 	if d.stopMon != nil {
 		d.stopMon()
 		d.stopMon = nil
@@ -349,6 +356,56 @@ func (d *Daemon) teardownLocked(unblock bool) {
 		d.plat.SetServerRoutes(nil, platform.DefaultRoute{})
 		d.plat.DisableKillSwitch()
 		d.ksOn = false
+	}
+}
+
+func (d *Daemon) directDialer() engine.Dialer {
+	if d.opts.DirectDialer != nil {
+		return d.opts.DirectDialer
+	}
+	return d.dial
+}
+
+// effectiveSettings are the tunnel settings, with exclusions moved into the
+// tunnel while the direct path is broken.
+func (d *Daemon) effectiveSettings(s Settings) tunnel.Settings {
+	ts := tunnelSettings(s)
+	if d.directBroken != nil {
+		ts.Exclusions = nil
+	}
+	return ts
+}
+
+// checkDirectLocked verifies that sockets bound to the physical interface can
+// reach a VPN server (a routing check: a UDP connect does a route lookup and
+// sends nothing). If they cannot, excluded domains would be reset, so they
+// go through the tunnel until the direct path works again.
+func (d *Daemon) checkDirectLocked(s Settings) {
+	if d.tun == nil || len(d.servers) == 0 {
+		return
+	}
+	var err error
+	if len(s.Exclusions) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		var c net.Conn
+		c, err = d.directDialer().DialUDP(ctx, netip.AddrPortFrom(d.servers[0], 443))
+		cancel()
+		if c != nil {
+			c.Close()
+		}
+	}
+	was := d.directBroken
+	d.directBroken = err
+	switch {
+	case err != nil && was == nil:
+		d.logf("warning: excluded domains cannot be reached directly (%v); sending them through the VPN for now", err)
+	case err == nil && was != nil:
+		d.logf("direct path works again; excluded domains bypass the VPN")
+	default:
+		return
+	}
+	if uerr := d.tun.UpdateSettings(d.effectiveSettings(s)); uerr != nil {
+		d.logf("apply settings: %v", uerr)
 	}
 }
 
@@ -395,10 +452,14 @@ func (d *Daemon) monitor(ctx context.Context, s Settings) {
 			d.plat.SetServerRoutes(d.servers, route)
 			d.plat.EnableKillSwitch(platform.KillSwitch{Tun: d.tunName, Servers: d.servers, AllowLAN: cur.AllowLAN, LAN: route.LAN})
 			d.tun.NetworkChanged(route.Interface+"|"+route.Gateway.String(), route.Index, route.Interface)
+			d.checkDirectLocked(cur)
 		}
 		d.plat.SetDNS(toAddrs(dnsServers(cur)))
 		if ticks++; ticks%15 == 0 {
 			d.checkConflictsLocked(d.tunName)
+			if d.directBroken != nil {
+				d.checkDirectLocked(cur)
+			}
 		}
 		d.mu.Unlock()
 	}
@@ -424,7 +485,7 @@ func (d *Daemon) SetSettings(s Settings) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.tun != nil {
-		if err := d.tun.UpdateSettings(tunnelSettings(s)); err != nil {
+		if err := d.tun.UpdateSettings(d.effectiveSettings(s)); err != nil {
 			return err
 		}
 		old := d.st.view().Settings
@@ -455,6 +516,9 @@ func (d *Daemon) Status() Status {
 	if d.tun != nil {
 		ts := d.tun.Status()
 		st.Tunnel = &ts
+	}
+	if d.directBroken != nil {
+		st.Warnings = append(append([]string(nil), st.Warnings...), "excluded domains go through the VPN: the direct path is unreachable ("+d.directBroken.Error()+")")
 	}
 	return st
 }

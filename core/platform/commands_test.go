@@ -110,3 +110,13 @@ func TestConflictParsers(t *testing.T) {
 		t.Fatal(n)
 	}
 }
+
+func TestScopedDefaultCommand(t *testing.T) {
+	gw := netip.MustParseAddr("192.168.1.1")
+	if got := strings.Join(ScopedDefaultCommand(true, gw, "en0"), " "); got != "route -q -n add -inet default 192.168.1.1 -ifscope en0" {
+		t.Fatal(got)
+	}
+	if got := strings.Join(ScopedDefaultCommand(false, gw, "en0"), " "); got != "route -q -n delete -inet default -ifscope en0" {
+		t.Fatal(got)
+	}
+}
