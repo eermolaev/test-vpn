@@ -1,0 +1,6 @@
+.DS_Store
+/apple/Frameworks/*.xcframework
+/apple/*.xcodeproj
+/apple/build/
+xcuserdata/
+*.mmdb
