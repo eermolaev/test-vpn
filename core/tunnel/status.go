@@ -30,6 +30,12 @@ type Stats struct {
 	DNSDirect  int64 `json:"dnsDirect"`
 	DNSTunnel  int64 `json:"dnsTunnel"`
 	DNSFailed  int64 `json:"dnsFailed"`
+
+	BytesTunnelUp   int64 `json:"bytesTunnelUp"`
+	BytesTunnelDown int64 `json:"bytesTunnelDown"`
+	BytesDirectUp   int64 `json:"bytesDirectUp"`
+	BytesDirectDown int64 `json:"bytesDirectDown"`
+	ActiveFlows     int   `json:"activeFlows"`
 }
 
 // Status is reported to the app. TransportID contains the server endpoint and

@@ -154,6 +154,9 @@ func (t *Tunnel) snapshotLocked() Status {
 		TCPTunnel: rs.TCPTunnel.Load(), TCPDirect: rs.TCPDirect.Load(), TCPReject: rs.TCPReject.Load(),
 		UDPTunnel: rs.UDPTunnel.Load(), UDPDirect: rs.UDPDirect.Load(), UDPReject: rs.UDPReject.Load(),
 		DNSQueries: rs.DNSQueries.Load(), DNSDirect: ds.Direct.Load(), DNSTunnel: ds.Tunnel.Load(), DNSFailed: ds.Failed.Load(),
+		BytesTunnelUp: rs.BytesTunnelUp.Load(), BytesTunnelDown: rs.BytesTunnelDown.Load(),
+		BytesDirectUp: rs.BytesDirectUp.Load(), BytesDirectDown: rs.BytesDirectDown.Load(),
+		ActiveFlows: t.router.ActiveFlows(),
 	}
 	s.DNSServers = append([]string(nil), t.dnsShown...)
 	return s
@@ -165,6 +168,9 @@ func (t *Tunnel) Status() Status {
 	defer t.mu.Unlock()
 	return t.snapshotLocked()
 }
+
+// Flows returns up to n active flows, busiest first.
+func (t *Tunnel) Flows(n int) []flowrouter.FlowInfo { return t.router.Flows(n) }
 
 // Router exposes the router (diagnostics and tests).
 func (t *Tunnel) Router() *flowrouter.Router { return t.router }

@@ -488,3 +488,48 @@ func TestSettingsChangeLive(t *testing.T) {
 		t.Fatal("new exclusion must apply to new flows without reconnect")
 	}
 }
+
+func TestFlowAccounting(t *testing.T) {
+	h := newHarness(t, []string{"bank.example"}, nil)
+	h.router.SetEngine(h.tunnel)
+
+	// An open connection shows up in the flow table with live byte counts.
+	payload := tlsHello("online.bank.example")
+	c, err := h.client.DialTCP(netip.MustParseAddrPort("198.51.100.50:443"), 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Write(payload)
+	var flows []FlowInfo
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		flows = h.router.Flows(10)
+		if len(flows) == 1 && flows[0].Up == int64(len(payload)) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(flows) != 1 || flows[0].Host != "online.bank.example" || flows[0].Route != "direct" || flows[0].Proto != "tcp" || flows[0].Up != int64(len(payload)) {
+		t.Fatalf("flows: %+v", flows)
+	}
+	c.Close()
+	for time.Now().Before(deadline) && h.router.ActiveFlows() > 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := h.router.ActiveFlows(); n != 0 {
+		t.Fatalf("closed flow still listed (%d)", n)
+	}
+
+	// A full exchange is counted in both directions on the tunnel side.
+	resp, err := h.tcp(t, "198.51.100.51:443", []byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &h.router.Stats
+	if s.BytesDirectUp.Load() != int64(len(payload)) {
+		t.Fatalf("direct up = %d", s.BytesDirectUp.Load())
+	}
+	if s.BytesTunnelUp.Load() != 5 || s.BytesTunnelDown.Load() != int64(len(resp)) {
+		t.Fatalf("tunnel up/down = %d/%d, resp %d", s.BytesTunnelUp.Load(), s.BytesTunnelDown.Load(), len(resp))
+	}
+}

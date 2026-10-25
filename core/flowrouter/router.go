@@ -66,6 +66,9 @@ type Stats struct {
 	TCPTunnel, TCPDirect, TCPReject atomic.Int64
 	UDPTunnel, UDPDirect, UDPReject atomic.Int64
 	DNSQueries                      atomic.Int64
+	// Payload bytes of relayed flows; up is app -> internet.
+	BytesTunnelUp, BytesTunnelDown atomic.Int64
+	BytesDirectUp, BytesDirectDown atomic.Int64
 }
 
 const (
@@ -91,6 +94,7 @@ type Router struct {
 	eng      atomic.Pointer[engineRef]
 
 	Stats Stats
+	flows flowTable
 	// OnDecision, if set, is called for every flow (diagnostics, tests).
 	OnDecision func(f netstack.Flow, proto string, d Decision)
 }
@@ -231,14 +235,17 @@ func (r *Router) HandleTCP(c *netstack.TCPConn) {
 		r.Stats.TCPTunnel.Add(1)
 	}
 	r.notify(c.Flow, "tcp", d)
+	fe := r.track("tcp", c.Flow, d)
+	defer r.untrack(fe)
 	if len(prefix) > 0 {
 		if _, err := out.Write(prefix); err != nil {
 			out.Close()
 			c.Abort()
 			return
 		}
+		fe.addUp(len(prefix))
 	}
-	relayTCP(c, out)
+	relayTCP(c, out, fe)
 }
 
 // sniffStream reads the first bytes of a connection until a host is found,
@@ -271,12 +278,13 @@ func sniffStream(c net.Conn) ([]byte, string, sniff.Protocol) {
 
 type closeWriter interface{ CloseWrite() error }
 
-func relayTCP(a, b net.Conn) {
+// relayTCP relays between the app side a and the outbound side b.
+func relayTCP(a, b net.Conn, fe *flowEntry) {
 	var wg sync.WaitGroup
-	cp := func(dst, src net.Conn) {
+	cp := func(dst, src net.Conn, add func(int)) {
 		defer wg.Done()
 		bp := bufPool.Get().(*[]byte)
-		_, err := io.CopyBuffer(dst, src, *bp)
+		err := copyCounting(dst, src, *bp, add)
 		bufPool.Put(bp)
 		if cw, ok := dst.(closeWriter); ok && err == nil {
 			cw.CloseWrite()
@@ -286,8 +294,8 @@ func relayTCP(a, b net.Conn) {
 		}
 	}
 	wg.Add(2)
-	go cp(a, b)
-	go cp(b, a)
+	go cp(a, b, fe.addDown)
+	go cp(b, a, fe.addUp)
 	wg.Wait()
 	a.Close()
 	b.Close()
@@ -366,21 +374,28 @@ func (r *Router) HandleUDP(c *netstack.UDPConn) {
 		r.Stats.UDPTunnel.Add(1)
 	}
 	r.notify(c.Flow, "udp", d)
+	proto := "udp"
+	if isQUIC {
+		proto = "quic"
+	}
+	fe := r.track(proto, c.Flow, d)
+	defer r.untrack(fe)
 	for _, p := range pending {
 		if _, err := out.Write(p); err != nil {
 			return
 		}
+		fe.addUp(len(p))
 	}
-	relayUDP(c, out)
+	relayUDP(c, out, fe)
 }
 
 func looksLikeQUICInitial(b []byte) bool {
 	return len(b) >= 1200 && b[0]&0xc0 == 0xc0
 }
 
-func relayUDP(app, out net.Conn) {
+func relayUDP(app, out net.Conn, fe *flowEntry) {
 	done := make(chan struct{}, 2)
-	cp := func(dst, src net.Conn) {
+	cp := func(dst, src net.Conn, add func(int)) {
 		buf := make([]byte, maxDatagram)
 		for {
 			src.SetReadDeadline(time.Now().Add(udpIdleTimeout))
@@ -391,11 +406,12 @@ func relayUDP(app, out net.Conn) {
 			if _, err := dst.Write(buf[:n]); err != nil {
 				break
 			}
+			add(n)
 		}
 		done <- struct{}{}
 	}
-	go cp(out, app)
-	go cp(app, out)
+	go cp(out, app, fe.addUp)
+	go cp(app, out, fe.addDown)
 	<-done
 	app.Close()
 	out.Close()
