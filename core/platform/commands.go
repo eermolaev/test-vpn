@@ -182,16 +182,34 @@ func ParseNCList(out string) []string {
 	return active
 }
 
+// pfNoise reports pfctl informational lines (printed on stderr), e.g.
+// "No ALTQ support in kernel".
+func pfNoise(line string) bool {
+	return strings.Contains(line, "ALTQ") || strings.HasPrefix(line, "pf enabled") || strings.HasPrefix(line, "pf disabled")
+}
+
 // ParsePFAnchors returns top-level anchors other than Apple's and ours from
 // `pfctl -s Anchors` output.
 func ParsePFAnchors(out string) []string {
 	var other []string
 	for _, line := range strings.Split(out, "\n") {
 		a := strings.TrimSpace(line)
-		if a == "" || strings.HasPrefix(a, "com.apple") {
+		if a == "" || strings.HasPrefix(a, "com.apple") || pfNoise(a) || strings.ContainsRune(a, ' ') {
 			continue
 		}
 		other = append(other, a)
 	}
 	return other
+}
+
+// PFRuleCount counts rules in `pfctl -a NAME -sr` output.
+func PFRuleCount(out string) int {
+	n := 0
+	for _, line := range strings.Split(out, "\n") {
+		l := strings.TrimSpace(line)
+		if l != "" && !pfNoise(l) {
+			n++
+		}
+	}
+	return n
 }

@@ -397,7 +397,7 @@ func (m *Model) connectionsPanel(w, h int) string {
 	for _, c := range cols {
 		fixed += c + 1
 	}
-	hostW := max(10, inner-fixed)
+	hostW := min(max(10, inner-fixed), 60) // keep numbers close to the host on wide terminals
 	head := stDim.Render(fmt.Sprintf("%-5s %-7s %-*s %10s %10s %5s", "proto", "route", hostW, "host", "↓", "↑", "age"))
 	lines := []string{head}
 	rows := h - 3

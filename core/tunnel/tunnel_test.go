@@ -393,3 +393,51 @@ func TestUnreachableVLESSServerIsTCPError(t *testing.T) {
 		t.Fatalf("class %q, want tcp_reset", st.ErrorClass)
 	}
 }
+
+type failingDialer struct{}
+
+func (failingDialer) DialTCP(context.Context, netip.AddrPort) (net.Conn, error) {
+	return nil, errors.New("connect: operation not permitted")
+}
+func (failingDialer) DialUDP(context.Context, netip.AddrPort) (net.Conn, error) {
+	return nil, errors.New("connect: operation not permitted")
+}
+
+func TestDirectDialFailureIsLogged(t *testing.T) {
+	dns := startTCPDNS(t)
+	vless := &profile.VLESSConfig{Address: "203.0.113.10", Port: 443, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Security: "reality", Network: "raw", Flow: "xtls-rprx-vision", SNI: "a.example", PublicKey: "k", ShortID: "ab"}
+	var mu sync.Mutex
+	var logs []string
+	tunEnd, appEnd := netstack.NewPipe(256)
+	tun, err := Start(tunEnd, Config{
+		Profile:  &profile.Profile{Transports: []profile.Transport{{VLESS: vless}}},
+		Settings: Settings{Exclusions: []string{"bank.example"}, DNSServers: []string{dns.String()}},
+		Policy:   fastPolicy(),
+	}, Deps{
+		Starter: func(context.Context, profile.Transport) (engine.Engine, error) { return tcpOnlyEngine{dnsTCP: dns}, nil },
+		Direct:  failingDialer{},
+		Logf:    func(s string) { mu.Lock(); logs = append(logs, s); mu.Unlock() },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := clientstack.New(appEnd)
+	defer func() { client.Close(); tun.Stop() }()
+	waitState(t, tun, StateConnected, 10*time.Second)
+	for i := 0; i < 2; i++ { // the second failure within a minute is not logged again
+		if _, err := tcpExchange(client, netip.MustParseAddrPort("198.51.100.9:443"), tlsHello("www.bank.example")); err == nil {
+			t.Fatal("flow must be reset")
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	n := 0
+	for _, l := range logs {
+		if strings.Contains(l, "direct tcp connection to www.bank.example (198.51.100.9:443) failed: connect: operation not permitted") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("logged %d times: %v", n, logs)
+	}
+}

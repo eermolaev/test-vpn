@@ -103,7 +103,10 @@ func TestConflictParsers(t *testing.T) {
 	if len(got) != 2 || got[0] != `VPN "AmneziaVPN" is connected` || got[1] != `VPN "Other" is connecting` {
 		t.Fatalf("%q", got)
 	}
-	if a := ParsePFAnchors("  com.apple\n  amn\n"); len(a) != 1 || a[0] != "amn" {
+	if a := ParsePFAnchors("No ALTQ support in kernel\nALTQ related functions disabled\n  com.apple\n  amn\n"); len(a) != 1 || a[0] != "amn" {
 		t.Fatalf("%q", a)
+	}
+	if n := PFRuleCount("No ALTQ support in kernel\nblock drop out quick all\npass out quick on utun3 all\n"); n != 2 {
+		t.Fatal(n)
 	}
 }

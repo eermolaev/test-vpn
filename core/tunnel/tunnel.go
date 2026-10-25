@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,13 +52,14 @@ type Tunnel struct {
 	wakeCh chan struct{}
 	done   chan struct{}
 
-	mu        sync.Mutex
-	status    Status
-	eng       engine.Engine
-	netKey    string
-	dnsShown  []string
-	dnsAddrs  []netip.AddrPort // tunnel resolvers, also used for health checks
-	udpWarned engine.Engine
+	mu          sync.Mutex
+	status      Status
+	eng         engine.Engine
+	netKey      string
+	dnsShown    []string
+	dnsAddrs    []netip.AddrPort // tunnel resolvers, also used for health checks
+	udpWarned   engine.Engine
+	dialFailLog map[string]time.Time
 }
 
 // Start validates cfg, starts the stack with the kill switch active, and
@@ -107,6 +109,7 @@ func Start(pio netstack.PacketIO, cfg Config, deps Deps) (*Tunnel, error) {
 	}
 	t.resolver = dnsintercept.NewResolver(t.cache, directDNS, comp.dns)
 	t.router = flowrouter.New(directDialer, t.resolver, t.cache, comp.router)
+	t.router.OnDecision = t.logDialFailure
 	t.dnsShown = serversString(comp.dns.TunnelServers)
 	t.dnsAddrs = comp.dns.TunnelServers
 	t.status = Status{State: StateConnecting, Since: time.Now(), Exclusions: comp.router.Exclusions.Len(), DNSServers: t.dnsShown}
@@ -118,6 +121,39 @@ func Start(pio netstack.PacketIO, cfg Config, deps Deps) (*Tunnel, error) {
 	t.ctx, t.cancel = context.WithCancel(context.Background())
 	go t.run()
 	return t, nil
+}
+
+// logDialFailure logs flows that were reset because the outbound connection
+// could not be opened, at most once a minute per host and route, so that
+// "connection reset" in an app has a visible cause.
+func (t *Tunnel) logDialFailure(f netstack.Flow, proto string, d flowrouter.Decision) {
+	if d.Route != flowrouter.Reject || !strings.HasPrefix(d.Reason, "dial: ") {
+		return
+	}
+	host := d.Host
+	if host == "" {
+		host = f.Dst.Addr().String()
+	}
+	route := "tunnel"
+	if s := t.router.Settings(); s.Exclusions.Match(host) {
+		route = "direct"
+	}
+	key := route + "|" + host
+	now := time.Now()
+	t.mu.Lock()
+	if t.dialFailLog == nil {
+		t.dialFailLog = map[string]time.Time{}
+	}
+	if last, ok := t.dialFailLog[key]; ok && now.Sub(last) < time.Minute {
+		t.mu.Unlock()
+		return
+	}
+	if len(t.dialFailLog) > 256 {
+		t.dialFailLog = map[string]time.Time{}
+	}
+	t.dialFailLog[key] = now
+	t.mu.Unlock()
+	t.logf("%s %s connection to %s (%s) failed: %s", route, proto, host, f.Dst, strings.TrimPrefix(d.Reason, "dial: "))
 }
 
 func serversString(s []netip.AddrPort) []string {

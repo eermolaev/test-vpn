@@ -408,7 +408,14 @@ func (d *Darwin) Conflicts(ownTun string) []string {
 	}
 	if a, err := d.run("", "pfctl", "-s", "Anchors"); err == nil {
 		for _, name := range ParsePFAnchors(a) {
-			out = append(out, "another firewall anchor is loaded: "+name)
+			rules, _ := d.run("", "pfctl", "-a", name, "-sr")
+			if n := PFRuleCount(rules); n > 0 {
+				hint := ""
+				if name == "amn" {
+					hint = " (Amnezia kill switch)"
+				}
+				out = append(out, fmt.Sprintf("firewall anchor %q%s has %d active rules and may block traffic; remove with: sudo pfctl -a %s -F all", name, hint, n, name))
+			}
 		}
 	}
 	return out
