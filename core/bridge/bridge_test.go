@@ -65,8 +65,10 @@ func TestStartErrors(t *testing.T) {
 	if _, err := StartWithCallbacks("{", &fakeWriter{}, nil, nil, nil); err == nil || ErrorClass(err) != "config" {
 		t.Fatalf("bad json: %v", err)
 	}
-	if _, err := StartWithFD(`{}`, 3, nil, nil, nil); err == nil {
-		t.Fatal("fd mode must fail off Darwin")
+	// An invalid fd: never pass a real one, a failed start must not close
+	// descriptors it does not own.
+	if _, err := StartWithFD(`{}`, -1, nil, nil, nil); err == nil {
+		t.Fatal("invalid fd must fail")
 	}
 	if ErrorMessage("udp_timeout") == "" {
 		t.Fatal("message")

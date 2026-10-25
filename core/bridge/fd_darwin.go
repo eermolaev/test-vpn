@@ -8,5 +8,5 @@ func utunIO(fd, mtu int) (netstack.PacketIO, error) {
 	if mtu == 0 {
 		mtu = 1400
 	}
-	return netstack.NewUtunIO(fd, mtu), nil
+	return netstack.NewUtunIO(fd, mtu)
 }

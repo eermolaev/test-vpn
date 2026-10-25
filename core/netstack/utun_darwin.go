@@ -17,10 +17,20 @@ type UtunIO struct {
 	wb  []byte
 }
 
-// NewUtunIO wraps fd. The fd is owned by the system; Close does not close it
-// (the packet tunnel provider tears the interface down itself).
-func NewUtunIO(fd int, mtu int) *UtunIO {
-	return &UtunIO{f: os.NewFile(uintptr(fd), "utun"), buf: make([]byte, mtu+4+64), wb: make([]byte, 0, mtu+4+64)}
+// NewUtunIO wraps a duplicate of fd. The original fd is owned by the system
+// (the packet tunnel provider tears the interface down itself) and is never
+// closed here; Close closes only the duplicate, which also unblocks readers.
+func NewUtunIO(fd int, mtu int) (*UtunIO, error) {
+	dup, err := unix.Dup(fd)
+	if err != nil {
+		return nil, err
+	}
+	// Non-blocking, so that os.File uses the poller and Close interrupts Read.
+	if err := unix.SetNonblock(dup, true); err != nil {
+		unix.Close(dup)
+		return nil, err
+	}
+	return &UtunIO{f: os.NewFile(uintptr(dup), "utun"), buf: make([]byte, mtu+4+64), wb: make([]byte, 0, mtu+4+64)}, nil
 }
 
 func (u *UtunIO) ReadPacket(p []byte) (int, error) {
@@ -48,5 +58,5 @@ func (u *UtunIO) WritePacket(p []byte) error {
 	return err
 }
 
-// Close unblocks readers by closing the duplicate file.
+// Close closes the duplicate fd, unblocking readers.
 func (u *UtunIO) Close() error { return u.f.Close() }

@@ -46,22 +46,14 @@ func startEcho(t *testing.T, name string) *echoServers {
 			}
 			go func() {
 				defer c.Close()
-				// Collect the request until the client pauses: the router may
-				// forward a sniffed prefix and the rest in separate writes.
-				var req []byte
-				buf := make([]byte, 64<<10)
-				for {
-					c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-					n, err := c.Read(buf)
-					req = append(req, buf[:n]...)
-					if err != nil {
-						break
-					}
-				}
-				if len(req) == 0 {
+				// The client half-closes after sending: read to EOF, so a
+				// request split by the router (sniffed prefix, then the rest)
+				// arrives whole regardless of timing.
+				c.SetDeadline(time.Now().Add(10 * time.Second))
+				req, err := io.ReadAll(c)
+				if err != nil || len(req) == 0 {
 					return
 				}
-				c.SetDeadline(time.Time{})
 				c.Write([]byte(name + ":" + string(req)))
 			}()
 		}
@@ -170,9 +162,13 @@ func (h *harness) tcp(t *testing.T, dst string, payload []byte) (string, error) 
 	if _, err := c.Write(payload); err != nil {
 		return "", err
 	}
-	buf := make([]byte, 64<<10)
-	n, err := io.ReadAtLeast(c, buf, 2)
-	return string(buf[:n]), err
+	// Half-close: the echo server answers after EOF, which also checks that
+	// the router propagates FIN.
+	if cw, ok := c.(interface{ CloseWrite() error }); ok {
+		cw.CloseWrite()
+	}
+	resp, err := io.ReadAll(c)
+	return string(resp), err
 }
 
 func (h *harness) udp(t *testing.T, dst string, payloads ...[]byte) (string, error) {
