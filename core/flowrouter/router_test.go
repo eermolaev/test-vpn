@@ -556,3 +556,47 @@ func TestTunnelOnlyWinsOverExclusions(t *testing.T) {
 		t.Fatal("VPN-only domain must be blocked while the tunnel is down")
 	}
 }
+
+func TestVPNListIncludeMode(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	h.router.SetEngine(h.tunnel)
+	vpn, _ := rules.NewTunnelSet([]string{"youtube.com"})
+	h.router.SetSettings(Settings{TunnelOnly: vpn})
+	if resp, _ := h.tcp(t, "198.51.100.70:443", tlsHello("www.youtube.com")); path(resp) != "T" {
+		t.Fatal("listed domain must use the tunnel")
+	}
+	if resp, _ := h.tcp(t, "198.51.100.70:443", tlsHello("example.org")); path(resp) != "D" {
+		t.Fatal("unlisted domain must go direct")
+	}
+	if resp, _ := h.tcp(t, "198.51.100.71:9000", []byte("raw")); path(resp) != "D" {
+		t.Fatal("unknown destination must go direct in include mode")
+	}
+	if resp, _ := h.tcp(t, "198.51.100.70:443", tlsHello("api.ipify.org")); path(resp) != "T" {
+		t.Fatal("self-check hosts must always use the tunnel")
+	}
+	// Tunnel down: unlisted sites keep working, listed ones are blocked.
+	h.router.SetEngine(nil)
+	if resp, _ := h.tcp(t, "198.51.100.70:443", tlsHello("example.org")); path(resp) != "D" {
+		t.Fatal("unlisted domain must stay direct while the tunnel is down")
+	}
+	if _, err := h.tcp(t, "198.51.100.70:443", tlsHello("youtube.com")); err == nil {
+		t.Fatal("listed domain must be blocked while the tunnel is down")
+	}
+}
+
+func TestVPNListWildcard(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	h.router.SetEngine(h.tunnel)
+	excl, _ := rules.NewSet([]string{"vk.com"})
+	vpn, _ := rules.NewTunnelSet([]string{"*", "full:vk.com"})
+	h.router.SetSettings(Settings{Exclusions: excl, TunnelOnly: vpn})
+	if resp, _ := h.tcp(t, "198.51.100.72:443", tlsHello("m.vk.com")); path(resp) != "D" {
+		t.Fatal("exclusion must win over *")
+	}
+	if resp, _ := h.tcp(t, "198.51.100.72:443", tlsHello("vk.com")); path(resp) != "T" {
+		t.Fatal("exact VPN rule must win over the suffix exclusion")
+	}
+	if resp, _ := h.tcp(t, "198.51.100.73:9000", []byte("raw")); path(resp) != "T" {
+		t.Fatal("unknown destination must use the tunnel with *")
+	}
+}

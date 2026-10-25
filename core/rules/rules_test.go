@@ -114,3 +114,44 @@ func TestTunnelSet(t *testing.T) {
 		t.Fatal("covers")
 	}
 }
+
+func TestPolicy(t *testing.T) {
+	set := func(l ...string) *Set { s, _ := NewSet(l); return s }
+	vpn := func(l ...string) *Set {
+		s, errs := NewTunnelSet(l)
+		if errs != nil {
+			t.Fatal(errs)
+		}
+		return s
+	}
+	cases := []struct {
+		name   string
+		p      Policy
+		host   string
+		direct bool
+	}{
+		{"no lists: tunnel", Policy{}, "example.com", false},
+		{"no lists: unknown host tunnel", Policy{}, "", false},
+		{"star + exclusion", Policy{Exclusions: set("vk.com"), VPN: vpn("*")}, "m.vk.com", true},
+		{"star: rest tunnel", Policy{Exclusions: set("vk.com"), VPN: vpn("*")}, "google.com", false},
+		{"include mode: listed", Policy{VPN: vpn("youtube.com")}, "www.youtube.com", false},
+		{"include mode: other direct", Policy{VPN: vpn("youtube.com")}, "yandex.ru", true},
+		{"include mode: unknown direct", Policy{VPN: vpn("youtube.com")}, "", true},
+		{"more specific VPN wins", Policy{Exclusions: set("ru"), VPN: vpn("mail.ru")}, "e.mail.ru", false},
+		{"more specific exclusion wins", Policy{Exclusions: set("vk.com"), VPN: vpn("ru", "com")}, "vk.com", true},
+		{"tie: tunnel", Policy{Exclusions: set("vk.com"), VPN: vpn("vk.com")}, "vk.com", false},
+		{"full beats suffix", Policy{Exclusions: set("full:a.b.com"), VPN: vpn("a.b.com")}, "a.b.com", true},
+		{"protected always tunnel", Policy{VPN: vpn("youtube.com")}, "api.ipify.org", false},
+	}
+	for _, c := range cases {
+		if got := c.p.Direct(c.host); got != c.direct {
+			t.Errorf("%s: Direct(%q) = %v, want %v", c.name, c.host, got, c.direct)
+		}
+	}
+	if _, err := ParseRule("*"); !errors.Is(err, ErrWildcard) {
+		t.Fatal("* must be rejected in exclusions")
+	}
+	if s := vpn("*"); s.Export() != "*\n" || !s.FullTunnel() {
+		t.Fatal("wildcard round trip")
+	}
+}

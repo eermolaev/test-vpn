@@ -30,7 +30,8 @@ const (
 // Settings are the user settings that can change while connected.
 type Settings struct {
 	Exclusions []string `json:"exclusions"`
-	// TunnelOnly domains never go direct, even if an exclusion covers them.
+	// TunnelOnly is the VPN list: empty or "*" tunnels everything except
+	// exclusions, otherwise only the listed domains use the tunnel.
 	TunnelOnly       []string `json:"tunnelOnly,omitempty"`
 	DNSServers       []string `json:"dnsServers"`
 	DirectDNSServers []string `json:"directDNSServers"`

@@ -22,6 +22,8 @@ const (
 	Suffix Kind = iota
 	// Full matches only the exact domain.
 	Full
+	// Wildcard ("*") matches every host; only allowed in the VPN list.
+	Wildcard
 )
 
 const fullPrefix = "full:"
@@ -34,16 +36,22 @@ type Rule struct {
 
 // String returns the canonical textual form of the rule.
 func (r Rule) String() string {
-	if r.Kind == Full {
+	switch r.Kind {
+	case Full:
 		return fullPrefix + r.Domain
+	case Wildcard:
+		return "*"
 	}
 	return r.Domain
 }
 
 // Matches reports whether the normalized host is covered by the rule.
 func (r Rule) Matches(host string) bool {
-	if r.Kind == Full {
+	switch r.Kind {
+	case Full:
 		return host == r.Domain
+	case Wildcard:
+		return true
 	}
 	return host == r.Domain || strings.HasSuffix(host, "."+r.Domain)
 }
@@ -55,6 +63,7 @@ var (
 	ErrProtected = errors.New("domain is used for VPN self-checks and cannot be excluded")
 	ErrTooMany   = fmt.Errorf("too many rules (maximum %d)", MaxRules)
 	ErrDuplicate = errors.New("duplicate rule")
+	ErrWildcard  = errors.New(`"*" is only allowed in the VPN list`)
 )
 
 var profile = idna.New(
@@ -84,6 +93,9 @@ func NormalizeHost(host string) string {
 //	*.example.com      same as above
 //	full:example.com   exact domain only
 func ParseRule(s string) (Rule, error) {
+	if strings.TrimSpace(s) == "*" {
+		return Rule{}, ErrWildcard
+	}
 	r, err := parseRule(s)
 	if err == nil && IsProtectedRule(r) {
 		return Rule{}, fmt.Errorf("%w: %s", ErrProtected, r.Domain)
@@ -93,7 +105,12 @@ func ParseRule(s string) (Rule, error) {
 
 // ParseTunnelRule parses a rule for the VPN-only list. Self-check hosts may
 // be covered: forcing them into the tunnel is what they need anyway.
-func ParseTunnelRule(s string) (Rule, error) { return parseRule(s) }
+func ParseTunnelRule(s string) (Rule, error) {
+	if strings.TrimSpace(s) == "*" {
+		return Rule{Kind: Wildcard}, nil
+	}
+	return parseRule(s)
+}
 
 func parseRule(s string) (Rule, error) {
 	s = strings.TrimSpace(s)
@@ -122,9 +139,10 @@ func parseRule(s string) (Rule, error) {
 
 // Set is an immutable, validated exclusion list.
 type Set struct {
-	full   map[string]struct{}
-	suffix map[string]struct{}
-	rules  []Rule
+	full     map[string]struct{}
+	suffix   map[string]struct{}
+	wildcard bool
+	rules    []Rule
 }
 
 // LineError describes an invalid line of an imported list.
@@ -184,6 +202,9 @@ func ParseList(text string) (*Set, []LineError) {
 }
 
 func (s *Set) has(r Rule) bool {
+	if r.Kind == Wildcard {
+		return s.wildcard
+	}
 	if r.Kind == Full {
 		_, ok := s.full[r.Domain]
 		return ok
@@ -193,7 +214,9 @@ func (s *Set) has(r Rule) bool {
 }
 
 func (s *Set) add(r Rule) {
-	if r.Kind == Full {
+	if r.Kind == Wildcard {
+		s.wildcard = true
+	} else if r.Kind == Full {
 		s.full[r.Domain] = struct{}{}
 	} else {
 		s.suffix[r.Domain] = struct{}{}
@@ -245,20 +268,36 @@ func (s *Set) Covers(host string) bool {
 }
 
 func (s *Set) matchNormalized(h string) bool {
+	_, ok := s.specificity(h)
+	return ok
+}
+
+// Specificity of the most specific rule covering a normalized host: the
+// wildcard is 0, a suffix rule counts its labels, an exact rule beats any
+// suffix rule.
+func (s *Set) specificity(h string) (int, bool) {
 	if s == nil || len(s.rules) == 0 {
-		return false
+		return 0, false
 	}
 	if _, ok := s.full[h]; ok {
-		return true
+		return 1000, true
 	}
 	for d := h; ; {
 		if _, ok := s.suffix[d]; ok {
-			return true
+			return strings.Count(d, ".") + 1, true
 		}
 		i := strings.IndexByte(d, '.')
 		if i < 0 {
-			return false
+			break
 		}
 		d = d[i+1:]
 	}
+	if s.wildcard {
+		return 0, true
+	}
+	return 0, false
 }
+
+// FullTunnel reports whether the VPN list sends everything through the
+// tunnel: it is empty or contains "*".
+func (s *Set) FullTunnel() bool { return s == nil || len(s.rules) == 0 || s.wildcard }

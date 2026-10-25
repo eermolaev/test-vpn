@@ -43,7 +43,7 @@ root only. The socket accepts only root and the user who ran `install`.
 | `r` | re-check the tunnel now |
 | `p` | profiles: `i` import (paste, or `@~/path/file.conf`), `a` add transports to the selected profile, `enter` select, `t` pin a transport, `n` rename, `g` expected country, `d` delete |
 | `e` | domain exclusions (`ctrl+s` saves) |
-| `v` | VPN-only domains: never reached directly, win over exclusions (exclude `ru` but keep `mail.ru` in the VPN), blocked while the tunnel is down |
+| `v` | VPN list: which sites use the VPN (see [Which traffic uses the VPN](#which-traffic-uses-the-vpn)) |
 | `s` | settings: DNS (Google by default, Cloudflare, Quad9, custom), QUIC blocking, local network |
 | `x` | check exit IP, country and leaks |
 | `↑ ↓` | select a connection |
@@ -53,6 +53,27 @@ root only. The socket accepts only root and the user who ran `install`.
 The command line works too: `testvpn status`, `testvpn connect`,
 `testvpn disconnect`, `testvpn import profile.conf`, `testvpn check`,
 `testvpn logs [-f]` (also written to `/Library/Logs/testvpn.log`).
+
+## Which traffic uses the VPN
+
+Two lists decide it: **exclusions** (`e`, always direct) and the **VPN list**
+(`v`, through the tunnel, blocked while it is down).
+
+| VPN list | Result |
+| --- | --- |
+| empty or `*` | everything goes through the VPN except exclusions |
+| `youtube.com`, `x.com`, … | only these sites use the VPN; everything else goes direct |
+
+When both lists cover a site, the more specific rule wins (`full:x` beats
+`x`, `mail.ru` beats `ru`, any domain beats `*`); on a tie the VPN wins.
+Examples:
+
+- exclusions `ru`, VPN list `*` and `mail.ru`: `yandex.ru` direct, `e.mail.ru`
+  through the VPN, everything else through the VPN;
+- exclusions empty, VPN list `youtube.com`: only YouTube uses the VPN.
+
+Exit-IP check services always use the VPN. Traffic whose site cannot be
+identified follows the default: VPN with `*`, direct with a site list.
 
 ## Connect on startup
 

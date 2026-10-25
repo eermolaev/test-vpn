@@ -264,3 +264,19 @@ func TestTunnelOnlyDNS(t *testing.T) {
 		t.Fatalf("VPN-only must resolve through the tunnel: %s", ip)
 	}
 }
+
+func TestVPNListIncludeModeDNS(t *testing.T) {
+	network := startFakeDNS(t, [4]byte{10, 0, 0, 9}, false)
+	public := startFakeDNS(t, [4]byte{20, 0, 0, 9}, false)
+	vpn, _ := rules.NewTunnelSet([]string{"youtube.com"})
+	var n atomic.Int64
+	r := NewResolver(NewCache(0), countingDial(&n), Config{TunnelOnly: vpn,
+		TunnelServers: []netip.AddrPort{public.addr()}, DirectServers: []netip.AddrPort{network.addr()}})
+	r.SetTunnel(countingDial(&n))
+	if _, ip := rcodeAndIP(t, r.Serve(context.Background(), query(t, "example.org", 1))); ip != "10.0.0.9" {
+		t.Fatalf("unlisted name must resolve directly: %s", ip)
+	}
+	if _, ip := rcodeAndIP(t, r.Serve(context.Background(), query(t, "www.youtube.com", 2))); ip != "20.0.0.9" {
+		t.Fatalf("listed name must resolve through the tunnel: %s", ip)
+	}
+}

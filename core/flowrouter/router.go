@@ -56,12 +56,18 @@ type Decision struct {
 // Settings can be replaced at runtime; they apply to new flows (SPLIT-001).
 type Settings struct {
 	Exclusions *rules.Set
-	// TunnelOnly lists domains that must never be reached directly; they win
-	// over exclusions (e.g. exclude "ru" but keep "mail.ru" in the VPN).
+	// TunnelOnly is the VPN list: empty or "*" sends everything except
+	// exclusions through the tunnel; otherwise only the listed domains use
+	// it. The more specific rule wins over exclusions (see rules.Policy).
 	TunnelOnly *rules.Set
 	// BlockQUICInTunnel drops QUIC (UDP 443) in the tunnel when the engine does
 	// not carry UDP natively, so browsers fall back to TCP (spec 4.2).
 	BlockQUICInTunnel bool
+}
+
+// Policy returns the routing policy for these settings.
+func (s Settings) Policy() rules.Policy {
+	return rules.Policy{Exclusions: s.Exclusions, VPN: s.TunnelOnly}
 }
 
 // Stats counts flows by route.
@@ -143,7 +149,7 @@ func (r *Router) Decide(dst netip.AddrPort, host string, src Source) Decision {
 	}
 	s := r.settings.Load()
 	d := Decision{Route: Tunnel, Host: host, Source: src}
-	direct := func(h string) bool { return s.Exclusions.Match(h) && !s.TunnelOnly.Covers(h) }
+	direct := s.Policy().Direct
 	switch {
 	case host != "":
 		// The sniffed name wins over the DNS cache: two domains may share a
@@ -159,6 +165,9 @@ func (r *Router) Decide(dst netip.AddrPort, host string, src Source) Decision {
 			}
 		} else {
 			d.Source = SourceNone
+			if direct("") {
+				d.Route = Direct
+			}
 		}
 	}
 	if d.Route == Tunnel && r.Engine() == nil {
@@ -193,7 +202,7 @@ func (r *Router) AcceptTCP(f netstack.Flow) bool {
 		r.notify(f, "tcp", Decision{Route: Reject, Reason: "ipv6 disabled"})
 		return false
 	}
-	if r.Engine() == nil && r.settings.Load().Exclusions.Len() == 0 && f.Dst.Port() != 53 {
+	if s := r.settings.Load(); r.Engine() == nil && s.Exclusions.Len() == 0 && s.TunnelOnly.FullTunnel() && f.Dst.Port() != 53 {
 		r.Stats.TCPReject.Add(1)
 		r.notify(f, "tcp", Decision{Route: Reject, Reason: "tunnel down"})
 		return false

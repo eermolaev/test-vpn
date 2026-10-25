@@ -51,7 +51,7 @@ func (helpDialog) View(m *Model, w, h int) string {
 		{"r", "re-check the tunnel now"},
 		{"p", "profiles: import, select, pin transport, expected country"},
 		{"e", "domain exclusions (bypass the VPN)"},
-		{"v", "VPN-only domains (never direct, win over exclusions)"},
+		{"v", "VPN list: * = everything, or only the listed sites use the VPN"},
 		{"s", "settings: DNS, QUIC, local network"},
 		{"x", "check exit IP, country and leaks"},
 		{"↑ ↓", "select connection"},
@@ -143,7 +143,7 @@ func (d *exclusionsDialog) View(m *Model, w, h int) string {
 	_, errs := d.parse()
 	title, intro := "exclusions", "Traffic to these domains bypasses the VPN; the sites see your real IP."
 	if d.kind == listVPNOnly {
-		title, intro = "vpn-only", "These domains are never reached directly: they win over exclusions and are blocked while the VPN is down."
+		title, intro = "vpn list", "Sites that use the VPN and are blocked while it is down. * or an empty list = everything except exclusions; otherwise everything else goes direct. The more specific rule wins over exclusions."
 	}
 	lines := []string{stDim.Render(intro)}
 	lines = append(lines, strings.Split(d.ta.View(), "\n")...)
@@ -154,7 +154,11 @@ func (d *exclusionsDialog) View(m *Model, w, h int) string {
 	if d.err != "" {
 		status = stBad.Render(d.err)
 	}
-	lines = append(lines, status, hints("ctrl+s", "save", "esc", "cancel")+stDim.Render("   example.com = with subdomains, full:x = exact"))
+	syntax := "   example.com = with subdomains, full:x = exact"
+	if d.kind == listVPNOnly {
+		syntax += ", * = everything"
+	}
+	lines = append(lines, status, hints("ctrl+s", "save", "esc", "cancel")+stDim.Render(syntax))
 	return box(title, "", lines, w, h, boxDialog)
 }
 

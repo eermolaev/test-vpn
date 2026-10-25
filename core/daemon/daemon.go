@@ -404,7 +404,8 @@ func (d *Daemon) directDialer() engine.Dialer {
 func (d *Daemon) effectiveSettings(s Settings) tunnel.Settings {
 	ts := tunnelSettings(s)
 	if d.directBroken != nil {
-		ts.Exclusions = nil
+		// Nothing can go direct: send everything through the tunnel.
+		ts.Exclusions, ts.TunnelOnly = nil, nil
 	}
 	return ts
 }
