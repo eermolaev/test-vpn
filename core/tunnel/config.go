@@ -122,6 +122,12 @@ func parseServers(list []string, field string) ([]netip.AddrPort, error) {
 	return out, nil
 }
 
+// Validate checks settings without applying them.
+func (s Settings) Validate() error {
+	_, err := s.compile()
+	return err
+}
+
 // Compile validates settings (GEO-010, SPLIT-001, SPLIT-003).
 func (s Settings) compile() (compiled, error) {
 	var serr SettingsError
