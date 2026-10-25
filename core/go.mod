@@ -4,6 +4,8 @@ go 1.26.0
 
 require (
 	github.com/amnezia-vpn/amneziawg-go v0.2.19
+	github.com/maxmind/mmdbwriter v1.2.0
+	github.com/oschwald/maxminddb-golang/v2 v2.7.0
 	github.com/xtls/xray-core v1.260327.0
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867
 	golang.org/x/net v0.61.0

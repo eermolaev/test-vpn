@@ -3,11 +3,21 @@
 package vpncore
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/netip"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/eermolaev/test-vpn/core/direct"
+	"github.com/eermolaev/test-vpn/core/egress"
 
 	"github.com/eermolaev/test-vpn/core/errclass"
 	"github.com/eermolaev/test-vpn/core/fallback"
@@ -292,4 +302,62 @@ func (c *callbackIO) WritePacket(p []byte) error {
 func (c *callbackIO) Close() error {
 	c.once.Do(func() { close(c.closed) })
 	return nil
+}
+
+// EgressConfig is the JSON accepted by RunEgressCheck.
+type egressConfig struct {
+	ExpectedCountry string `json:"expectedCountry"`
+	GeoIPPath       string `json:"geoipPath"`
+	InterfaceIndex  int    `json:"interfaceIndex"`
+	InterfaceName   string `json:"interfaceName"`
+	TimeZone        string `json:"timeZone"`
+	Exclusions      int    `json:"exclusions"`
+}
+
+// RunEgressCheck verifies the exit IP, country and leaks (GEO-001…009) and
+// returns the result JSON. Call it from the app process while connected.
+func RunEgressCheck(configJSON string) (string, error) {
+	var cfg egressConfig
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return "", err
+	}
+	ec := egress.Config{ExpectedCountry: cfg.ExpectedCountry, TimeZone: cfg.TimeZone, Exclusions: cfg.Exclusions}
+	if cfg.GeoIPPath != "" {
+		g, err := egress.OpenGeoIP(cfg.GeoIPPath)
+		if err == nil {
+			defer g.Close()
+			ec.GeoIP = g
+		}
+	}
+	if cfg.InterfaceIndex != 0 || cfg.InterfaceName != "" {
+		d := &direct.Dialer{}
+		d.SetInterface(cfg.InterfaceIndex, cfg.InterfaceName)
+		ec.BypassClient = bypassClient(d)
+	}
+	return egress.Check(context.Background(), ec).JSON(), nil
+}
+
+// bypassClient sends HTTP requests through sockets bound to the physical
+// interface; with a correct kill switch they must fail (GEO-006).
+func bypassClient(d *direct.Dialer) *http.Client {
+	return &http.Client{Timeout: 6 * time.Second, Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
+			if err != nil || len(ips) == 0 {
+				return nil, fmt.Errorf("resolve %s: %v", host, err)
+			}
+			p, _ := strconv.Atoi(port)
+			return d.DialTCP(ctx, netip.AddrPortFrom(ips[0], uint16(p)))
+		},
+	}}
+}
+
+// UpdateGeoIP downloads the DB-IP Lite Country database into dir and returns
+// the file path (GEO-008).
+func UpdateGeoIP(dir string) (string, error) {
+	return egress.UpdateGeoIP(context.Background(), nil, "", dir, time.Now())
 }
