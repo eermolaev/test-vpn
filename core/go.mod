@@ -2,6 +2,15 @@ module github.com/eermolaev/test-vpn/core
 
 go 1.26
 
-require golang.org/x/net v0.52.0
+require (
+	golang.org/x/net v0.52.0
+	golang.org/x/sys v0.42.0
+	gvisor.dev/gvisor v0.0.0-20260122175437-89a5d21be8f0
+)
 
-require golang.org/x/text v0.35.0 // indirect
+require (
+	github.com/google/btree v1.1.2 // indirect
+	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa // indirect
+	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/time v0.12.0 // indirect
+)
