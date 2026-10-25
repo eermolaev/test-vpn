@@ -31,6 +31,8 @@ targets:
         codeSign: true
       - framework: Frameworks/Vpncore.xcframework
         embed: false
+      # Go's net package resolves DNS through libresolv on Darwin.
+      - sdk: libresolv.tbd
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
@@ -50,6 +52,7 @@ targets:
       - framework: Frameworks/Vpncore.xcframework
         embed: false
       - sdk: NetworkExtension.framework
+      - sdk: libresolv.tbd
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(TUNNEL_BUNDLE_ID)
