@@ -214,6 +214,9 @@ func (m *Model) handleKey(k string) tea.Cmd {
 	case "e":
 		m.dialog = newExclusionsDialog(m)
 		return m.dialog.(*exclusionsDialog).focus()
+	case "v":
+		m.dialog = newListDialog(m, listVPNOnly)
+		return m.dialog.(*exclusionsDialog).focus()
 	case "s":
 		m.dialog = newSettingsDialog(m)
 	case "?", "h", "f1":

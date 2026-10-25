@@ -247,3 +247,20 @@ func TestCacheLimits(t *testing.T) {
 		t.Fatal("entry must expire")
 	}
 }
+
+func TestTunnelOnlyDNS(t *testing.T) {
+	network := startFakeDNS(t, [4]byte{10, 0, 0, 9}, false)
+	public := startFakeDNS(t, [4]byte{20, 0, 0, 9}, false)
+	excl, _ := rules.NewSet([]string{"ru"})
+	forced, _ := rules.NewTunnelSet([]string{"mail.ru"})
+	var n atomic.Int64
+	r := NewResolver(NewCache(0), countingDial(&n), Config{Exclusions: excl, TunnelOnly: forced,
+		TunnelServers: []netip.AddrPort{public.addr()}, DirectServers: []netip.AddrPort{network.addr()}})
+	r.SetTunnel(countingDial(&n))
+	if _, ip := rcodeAndIP(t, r.Serve(context.Background(), query(t, "yandex.ru", 1))); ip != "10.0.0.9" {
+		t.Fatalf("excluded: %s", ip)
+	}
+	if _, ip := rcodeAndIP(t, r.Serve(context.Background(), query(t, "e.mail.ru", 2))); ip != "20.0.0.9" {
+		t.Fatalf("VPN-only must resolve through the tunnel: %s", ip)
+	}
+}

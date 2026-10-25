@@ -104,3 +104,13 @@ func TestExportRoundTrip(t *testing.T) {
 		t.Fatalf("export = %q", s.Export())
 	}
 }
+
+func TestTunnelSet(t *testing.T) {
+	s, errs := NewTunnelSet([]string{"mail.ru", "com"})
+	if errs != nil {
+		t.Fatalf("VPN-only list may cover broad zones: %v", errs)
+	}
+	if !s.Covers("e.mail.ru") || !s.Covers("icanhazip.com") || s.Covers("yandex.ru") {
+		t.Fatal("covers")
+	}
+}

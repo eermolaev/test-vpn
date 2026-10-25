@@ -43,6 +43,7 @@ root only. The socket accepts only root and the user who ran `install`.
 | `r` | re-check the tunnel now |
 | `p` | profiles: `i` import (paste, or `@~/path/file.conf`), `a` add transports to the selected profile, `enter` select, `t` pin a transport, `n` rename, `g` expected country, `d` delete |
 | `e` | domain exclusions (`ctrl+s` saves) |
+| `v` | VPN-only domains: never reached directly, win over exclusions (exclude `ru` but keep `mail.ru` in the VPN), blocked while the tunnel is down |
 | `s` | settings: DNS (Google by default, Cloudflare, Quad9, custom), QUIC blocking, local network |
 | `x` | check exit IP, country and leaks |
 | `↑ ↓` | select a connection |

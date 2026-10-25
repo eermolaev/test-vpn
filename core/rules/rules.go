@@ -84,6 +84,18 @@ func NormalizeHost(host string) string {
 //	*.example.com      same as above
 //	full:example.com   exact domain only
 func ParseRule(s string) (Rule, error) {
+	r, err := parseRule(s)
+	if err == nil && IsProtectedRule(r) {
+		return Rule{}, fmt.Errorf("%w: %s", ErrProtected, r.Domain)
+	}
+	return r, err
+}
+
+// ParseTunnelRule parses a rule for the VPN-only list. Self-check hosts may
+// be covered: forcing them into the tunnel is what they need anyway.
+func ParseTunnelRule(s string) (Rule, error) { return parseRule(s) }
+
+func parseRule(s string) (Rule, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return Rule{}, ErrEmpty
@@ -105,11 +117,7 @@ func ParseRule(s string) (Rule, error) {
 	if d == "" || !strings.Contains(d, ".") && kind == Full {
 		return Rule{}, fmt.Errorf("%w: %q", ErrInvalid, s)
 	}
-	r := Rule{Kind: kind, Domain: d}
-	if IsProtectedRule(r) {
-		return Rule{}, fmt.Errorf("%w: %s", ErrProtected, d)
-	}
-	return r, nil
+	return Rule{Kind: kind, Domain: d}, nil
 }
 
 // Set is an immutable, validated exclusion list.
@@ -132,7 +140,18 @@ func (e LineError) Unwrap() error { return e.Err }
 // NewSet validates the given entries. Blank lines and lines starting with '#'
 // are ignored. If any entry is invalid, the set is not created and all errors
 // are returned, so that the user can fix the list in one pass.
-func NewSet(entries []string) (*Set, []LineError) {
+func NewSet(entries []string) (*Set, []LineError) { return newSet(entries, ParseRule) }
+
+// NewTunnelSet validates a VPN-only list (domains that must never be reached
+// directly). It uses the same format as exclusions.
+func NewTunnelSet(entries []string) (*Set, []LineError) { return newSet(entries, ParseTunnelRule) }
+
+// ParseTunnelList parses a newline-separated VPN-only list.
+func ParseTunnelList(text string) (*Set, []LineError) {
+	return NewTunnelSet(strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n"))
+}
+
+func newSet(entries []string, parse func(string) (Rule, error)) (*Set, []LineError) {
 	s := &Set{full: map[string]struct{}{}, suffix: map[string]struct{}{}}
 	var errs []LineError
 	for i, raw := range entries {
@@ -140,7 +159,7 @@ func NewSet(entries []string) (*Set, []LineError) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		r, err := ParseRule(line)
+		r, err := parse(line)
 		if err == nil && s.has(r) {
 			err = ErrDuplicate
 		}
@@ -211,11 +230,22 @@ func (s *Set) Export() string {
 // Match reports whether host must bypass the tunnel. Protected hosts never
 // match, even if a broader rule (for example "google.com") covers them.
 func (s *Set) Match(host string) bool {
-	if s == nil || len(s.rules) == 0 {
-		return false
-	}
 	h := NormalizeHost(host)
 	if h == "" || IsProtectedHost(h) {
+		return false
+	}
+	return s.matchNormalized(h)
+}
+
+// Covers reports whether a rule covers host (no protected-host exception);
+// used for the VPN-only list.
+func (s *Set) Covers(host string) bool {
+	h := NormalizeHost(host)
+	return h != "" && s.matchNormalized(h)
+}
+
+func (s *Set) matchNormalized(h string) bool {
+	if s == nil || len(s.rules) == 0 {
 		return false
 	}
 	if _, ok := s.full[h]; ok {

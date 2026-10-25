@@ -29,7 +29,9 @@ const (
 
 // Settings are the user settings that can change while connected.
 type Settings struct {
-	Exclusions       []string `json:"exclusions"`
+	Exclusions []string `json:"exclusions"`
+	// TunnelOnly domains never go direct, even if an exclusion covers them.
+	TunnelOnly       []string `json:"tunnelOnly,omitempty"`
 	DNSServers       []string `json:"dnsServers"`
 	DirectDNSServers []string `json:"directDNSServers"`
 	ExclusionDNSMode string   `json:"exclusionDNSMode"`
@@ -81,6 +83,7 @@ type compiled struct {
 // SettingsError lists all invalid entries.
 type SettingsError struct {
 	Exclusions []rules.LineError
+	TunnelOnly []rules.LineError
 	Other      []string
 }
 
@@ -88,6 +91,9 @@ func (e *SettingsError) Error() string {
 	var parts []string
 	for _, le := range e.Exclusions {
 		parts = append(parts, "exclusions: "+le.Error())
+	}
+	for _, le := range e.TunnelOnly {
+		parts = append(parts, "vpn-only: "+le.Error())
 	}
 	parts = append(parts, e.Other...)
 	return strings.Join(parts, "; ")
@@ -133,6 +139,8 @@ func (s Settings) compile() (compiled, error) {
 	var serr SettingsError
 	set, lineErrs := rules.NewSet(s.Exclusions)
 	serr.Exclusions = lineErrs
+	forced, forcedErrs := rules.NewTunnelSet(s.TunnelOnly)
+	serr.TunnelOnly = forcedErrs
 	dnsList := s.DNSServers
 	if len(dnsList) == 0 {
 		dnsList = DefaultDNS
@@ -152,7 +160,7 @@ func (s Settings) compile() (compiled, error) {
 	default:
 		serr.Other = append(serr.Other, fmt.Sprintf("exclusionDNSMode: unknown mode %q", s.ExclusionDNSMode))
 	}
-	if len(serr.Exclusions) > 0 || len(serr.Other) > 0 {
+	if len(serr.Exclusions) > 0 || len(serr.TunnelOnly) > 0 || len(serr.Other) > 0 {
 		return compiled{}, errclass.Wrap(errclass.Config, &serr)
 	}
 	block := true
@@ -160,8 +168,8 @@ func (s Settings) compile() (compiled, error) {
 		block = *s.BlockQUIC
 	}
 	return compiled{
-		router: flowrouter.Settings{Exclusions: set, BlockQUICInTunnel: block},
-		dns:    dnsintercept.Config{Exclusions: set, TunnelServers: tunnelDNS, DirectServers: directDNS},
+		router: flowrouter.Settings{Exclusions: set, TunnelOnly: forced, BlockQUICInTunnel: block},
+		dns:    dnsintercept.Config{Exclusions: set, TunnelOnly: forced, TunnelServers: tunnelDNS, DirectServers: directDNS},
 	}, nil
 }
 

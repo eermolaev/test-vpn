@@ -533,3 +533,26 @@ func TestFlowAccounting(t *testing.T) {
 		t.Fatalf("tunnel up/down = %d/%d, resp %d", s.BytesTunnelUp.Load(), s.BytesTunnelDown.Load(), len(resp))
 	}
 }
+
+func TestTunnelOnlyWinsOverExclusions(t *testing.T) {
+	h := newHarness(t, []string{"ru"}, nil)
+	h.router.SetEngine(h.tunnel)
+	excl, _ := rules.NewSet([]string{"ru"})
+	forced, _ := rules.NewTunnelSet([]string{"mail.ru"})
+	h.router.SetSettings(Settings{Exclusions: excl, TunnelOnly: forced})
+	if resp, _ := h.tcp(t, "198.51.100.60:443", tlsHello("yandex.ru")); path(resp) != "D" {
+		t.Fatal("excluded zone must go direct")
+	}
+	if resp, _ := h.tcp(t, "198.51.100.60:443", tlsHello("e.mail.ru")); path(resp) != "T" {
+		t.Fatal("VPN-only domain must use the tunnel despite the exclusion")
+	}
+	h.cache.Put(netip.MustParseAddr("198.51.100.61"), "cloud.mail.ru", time.Minute)
+	if resp, _ := h.tcp(t, "198.51.100.61:9000", []byte("raw")); path(resp) != "T" {
+		t.Fatal("VPN-only via DNS cache must use the tunnel")
+	}
+	// While the tunnel is down VPN-only domains are rejected, not sent direct.
+	h.router.SetEngine(nil)
+	if _, err := h.tcp(t, "198.51.100.60:443", tlsHello("e.mail.ru")); err == nil {
+		t.Fatal("VPN-only domain must be blocked while the tunnel is down")
+	}
+}

@@ -313,3 +313,21 @@ func TestServiceDown(t *testing.T) {
 		t.Fatal("service down hint missing")
 	}
 }
+
+func TestVPNOnlyDialog(t *testing.T) {
+	be := connectedBackend()
+	m := New(be)
+	exec(m, m.Init(), 0)
+	run(m, key("v"))
+	typeText(m, "mail.ru\ncom")
+	if !strings.Contains(checkGeometry(t, m, 120, 40), "✓ valid") {
+		t.Fatal("broad zones are valid in the VPN-only list")
+	}
+	run(m, key("ctrl+s"))
+	if got := strings.Join(be.settings.VPNOnly, ","); got != "mail.ru,com" {
+		t.Fatalf("saved %q", got)
+	}
+	if !strings.Contains(checkGeometry(t, m, 120, 40), "⛨ mail.ru") {
+		t.Fatal("VPN-only list not shown")
+	}
+}

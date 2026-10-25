@@ -130,7 +130,7 @@ func (m *Model) header(w int) string {
 func (m *Model) footer(w int) string {
 	keys := []struct{ k, label string }{
 		{"c", connectLabel(m.status.Connected)}, {"r", "reconnect"}, {"p", "profiles"}, {"e", "exclusions"},
-		{"s", "settings"}, {"x", "check exit"}, {"?", "help"}, {"q", "quit"},
+		{"v", "vpn-only"}, {"s", "settings"}, {"x", "check exit"}, {"?", "help"}, {"q", "quit"},
 	}
 	var parts []string
 	for _, k := range keys {
@@ -197,6 +197,9 @@ func (m *Model) exitPanel(w, h int) string {
 	}
 	add("dns", strings.Join(st.DNSServers, ", "))
 	add("excluded", plural(len(m.settings.Exclusions), "domain"))
+	if n := len(m.settings.VPNOnly); n > 0 {
+		add("vpn-only", plural(n, "domain"))
+	}
 	if st.Route.Interface != "" {
 		add("network", st.Route.Interface+" via "+st.Route.Gateway.String())
 	}
@@ -324,6 +327,12 @@ func (m *Model) transportsPanel(w, h int) string {
 		policy := stDim.Render(string(t.Policy))
 		lines = append(lines, marker+stMain.Render(name)+pin)
 		lines = append(lines, "    "+stDim.Render(string(t.Kind)+" · "+t.Detail+" · ")+policy)
+	}
+	if vo := m.settings.VPNOnly; len(vo) > 0 {
+		lines = append(lines, "", stTitle.Render("vpn-only")+stDim.Render(" (never direct)"))
+		for _, e := range vo {
+			lines = append(lines, "  "+fg(colTunnel).Render("⛨ ")+stMain.Render(e))
+		}
 	}
 	if ex := m.settings.Exclusions; len(ex) > 0 {
 		lines = append(lines, "", stTitle.Render("excluded")+stDim.Render(" (bypass the VPN)"))

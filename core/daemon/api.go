@@ -31,7 +31,10 @@ const (
 
 // Settings are the user settings (GEO-010, SPLIT-001/003).
 type Settings struct {
-	Exclusions       []string `json:"exclusions"`
+	Exclusions []string `json:"exclusions"`
+	// VPNOnly domains never go direct (they win over exclusions) and are
+	// blocked while the tunnel is down.
+	VPNOnly          []string `json:"vpnOnly,omitempty"`
 	DNSServers       []string `json:"dnsServers"` // empty: Google 8.8.8.8, 8.8.4.4
 	ExclusionDNSMode string   `json:"exclusionDNSMode"`
 	BlockQUIC        bool     `json:"blockQUIC"`

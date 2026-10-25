@@ -56,6 +56,9 @@ type Decision struct {
 // Settings can be replaced at runtime; they apply to new flows (SPLIT-001).
 type Settings struct {
 	Exclusions *rules.Set
+	// TunnelOnly lists domains that must never be reached directly; they win
+	// over exclusions (e.g. exclude "ru" but keep "mail.ru" in the VPN).
+	TunnelOnly *rules.Set
 	// BlockQUICInTunnel drops QUIC (UDP 443) in the tunnel when the engine does
 	// not carry UDP natively, so browsers fall back to TCP (spec 4.2).
 	BlockQUICInTunnel bool
@@ -140,17 +143,18 @@ func (r *Router) Decide(dst netip.AddrPort, host string, src Source) Decision {
 	}
 	s := r.settings.Load()
 	d := Decision{Route: Tunnel, Host: host, Source: src}
+	direct := func(h string) bool { return s.Exclusions.Match(h) && !s.TunnelOnly.Covers(h) }
 	switch {
 	case host != "":
 		// The sniffed name wins over the DNS cache: two domains may share a
 		// CDN address, only the excluded one goes direct.
-		if s.Exclusions.Match(host) {
+		if direct(host) {
 			d.Route = Direct
 		}
 	default:
 		if h := r.cache.Lookup(dst.Addr()); h != "" {
 			d.Host, d.Source = h, SourceDNS
-			if s.Exclusions.Match(h) {
+			if direct(h) {
 				d.Route = Direct
 			}
 		} else {

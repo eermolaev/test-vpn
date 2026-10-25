@@ -51,6 +51,7 @@ func (helpDialog) View(m *Model, w, h int) string {
 		{"r", "re-check the tunnel now"},
 		{"p", "profiles: import, select, pin transport, expected country"},
 		{"e", "domain exclusions (bypass the VPN)"},
+		{"v", "VPN-only domains (never direct, win over exclusions)"},
 		{"s", "settings: DNS, QUIC, local network"},
 		{"x", "check exit IP, country and leaks"},
 		{"↑ ↓", "select connection"},
@@ -65,23 +66,45 @@ func (helpDialog) View(m *Model, w, h int) string {
 	return box("help", "", lines, w, len(lines)+2, boxDialog)
 }
 
-// --- exclusions -------------------------------------------------------------
+// --- domain lists (exclusions / VPN-only) ---------------------------------
+
+type listKind int
+
+const (
+	listExclusions listKind = iota
+	listVPNOnly
+)
 
 type exclusionsDialog struct {
-	ta  textarea.Model
-	err string
+	kind listKind
+	ta   textarea.Model
+	err  string
 }
 
-func newExclusionsDialog(m *Model) *exclusionsDialog {
+func newExclusionsDialog(m *Model) *exclusionsDialog { return newListDialog(m, listExclusions) }
+
+func newListDialog(m *Model, kind listKind) *exclusionsDialog {
 	ta := textarea.New()
 	ta.ShowLineNumbers = true
-	ta.Placeholder = "example.com\nfull:login.example.org"
-	ta.SetValue(strings.Join(m.settings.Exclusions, "\n"))
 	ta.CharLimit = 0
-	return &exclusionsDialog{ta: ta}
+	list := m.settings.Exclusions
+	ta.Placeholder = "example.com\nfull:login.example.org"
+	if kind == listVPNOnly {
+		list = m.settings.VPNOnly
+		ta.Placeholder = "mail.ru\nfull:id.example.org"
+	}
+	ta.SetValue(strings.Join(list, "\n"))
+	return &exclusionsDialog{kind: kind, ta: ta}
 }
 
 func (d *exclusionsDialog) focus() tea.Cmd { return d.ta.Focus() }
+
+func (d *exclusionsDialog) parse() (*rules.Set, []rules.LineError) {
+	if d.kind == listVPNOnly {
+		return rules.ParseTunnelList(d.ta.Value())
+	}
+	return rules.ParseList(d.ta.Value())
+}
 
 func (d *exclusionsDialog) Update(m *Model, msg tea.Msg) (bool, tea.Cmd) {
 	if k, ok := keyOf(msg); ok {
@@ -89,18 +112,24 @@ func (d *exclusionsDialog) Update(m *Model, msg tea.Msg) (bool, tea.Cmd) {
 		case "esc":
 			return true, nil
 		case "ctrl+s":
-			set, errs := rules.ParseList(d.ta.Value())
+			set, errs := d.parse()
 			if errs != nil {
 				d.err = errs[0].Error()
 				return false, nil
 			}
-			s := m.settings
-			s.Exclusions = nil
+			var list []string
 			for _, r := range set.Rules() {
-				s.Exclusions = append(s.Exclusions, r.String())
+				list = append(list, r.String())
+			}
+			s := m.settings
+			label := "save exclusions"
+			if d.kind == listVPNOnly {
+				s.VPNOnly, label = list, "save VPN-only list"
+			} else {
+				s.Exclusions = list
 			}
 			m.settings = s
-			return true, m.op("save exclusions", func() error { return m.be.SetSettings(s) })
+			return true, m.op(label, func() error { return m.be.SetSettings(s) })
 		}
 	}
 	var cmd tea.Cmd
@@ -111,8 +140,12 @@ func (d *exclusionsDialog) Update(m *Model, msg tea.Msg) (bool, tea.Cmd) {
 func (d *exclusionsDialog) View(m *Model, w, h int) string {
 	d.ta.SetWidth(w - 4)
 	d.ta.SetHeight(h - 8)
-	_, errs := rules.ParseList(d.ta.Value())
-	lines := []string{stDim.Render("Traffic to these domains bypasses the VPN; the sites see your real IP.")}
+	_, errs := d.parse()
+	title, intro := "exclusions", "Traffic to these domains bypasses the VPN; the sites see your real IP."
+	if d.kind == listVPNOnly {
+		title, intro = "vpn-only", "These domains are never reached directly: they win over exclusions and are blocked while the VPN is down."
+	}
+	lines := []string{stDim.Render(intro)}
 	lines = append(lines, strings.Split(d.ta.View(), "\n")...)
 	status := stOK.Render("✓ valid")
 	if len(errs) > 0 {
@@ -122,7 +155,7 @@ func (d *exclusionsDialog) View(m *Model, w, h int) string {
 		status = stBad.Render(d.err)
 	}
 	lines = append(lines, status, hints("ctrl+s", "save", "esc", "cancel")+stDim.Render("   example.com = with subdomains, full:x = exact"))
-	return box("exclusions", "", lines, w, h, boxDialog)
+	return box(title, "", lines, w, h, boxDialog)
 }
 
 // --- settings ---------------------------------------------------------------

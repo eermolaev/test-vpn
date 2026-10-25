@@ -14,6 +14,8 @@ import (
 // Config is the DNS part of the tunnel settings.
 type Config struct {
 	Exclusions *rules.Set
+	// TunnelOnly names are always resolved through the tunnel.
+	TunnelOnly *rules.Set
 	// TunnelServers are queried through the tunnel (default 8.8.8.8, 8.8.4.4).
 	TunnelServers []netip.AddrPort
 	// DirectServers resolve excluded domains outside the tunnel. When empty,
@@ -85,7 +87,7 @@ func (r *Resolver) Serve(ctx context.Context, q []byte) []byte {
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	var resp []byte
-	if cfg.Exclusions.Match(name) {
+	if cfg.Exclusions.Match(name) && !cfg.TunnelOnly.Covers(name) {
 		servers := cfg.DirectServers
 		if len(servers) == 0 {
 			servers = cfg.TunnelServers

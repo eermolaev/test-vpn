@@ -187,6 +187,7 @@ func tunnelSettings(s Settings) tunnel.Settings {
 	block := s.BlockQUIC
 	return tunnel.Settings{
 		Exclusions:       s.Exclusions,
+		TunnelOnly:       s.VPNOnly,
 		DNSServers:       dnsServers(s),
 		ExclusionDNSMode: s.ExclusionDNSMode,
 		BlockQUIC:        &block,
