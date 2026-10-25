@@ -46,11 +46,11 @@ type Profile struct {
 
 // Transport is one way to connect to the server.
 type Transport struct {
-	Kind   Kind          `json:"kind"`
-	Policy Policy        `json:"policy"`
-	Label  string        `json:"label,omitempty"`
-	AWG    *AWGConfig    `json:"awg,omitempty"`
-	VLESS  *VLESSConfig  `json:"vless,omitempty"`
+	Kind   Kind         `json:"kind"`
+	Policy Policy       `json:"policy"`
+	Label  string       `json:"label,omitempty"`
+	AWG    *AWGConfig   `json:"awg,omitempty"`
+	VLESS  *VLESSConfig `json:"vless,omitempty"`
 }
 
 // ID returns a stable identifier used to remember the working transport for a
@@ -137,9 +137,9 @@ type VLESSConfig struct {
 	Address  string `json:"address"`
 	Port     int    `json:"port"`
 	UUID     string `json:"uuid"`
-	Flow     string `json:"flow,omitempty"`     // xtls-rprx-vision
-	Security string `json:"security"`           // reality | tls | none
-	Network  string `json:"network"`            // raw | xhttp | grpc | ws
+	Flow     string `json:"flow,omitempty"` // xtls-rprx-vision
+	Security string `json:"security"`       // reality | tls | none
+	Network  string `json:"network"`        // raw | xhttp | grpc | ws
 	// TLS / REALITY.
 	SNI         string   `json:"sni,omitempty"`
 	Fingerprint string   `json:"fingerprint,omitempty"`

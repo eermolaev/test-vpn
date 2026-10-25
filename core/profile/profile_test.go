@@ -81,14 +81,14 @@ func TestAWGConf(t *testing.T) {
 
 func TestAWGConfErrors(t *testing.T) {
 	cases := map[string]string{
-		"unknown key":  strings.Replace(awgConf(), "MTU = 1380", "Foo = 1", 1),
-		"bad H range":  strings.Replace(awgConf(), "H3 = 300000", "H3 = 9-1", 1),
-		"jmin > jmax":  strings.Replace(awgConf(), "Jmin = 40", "Jmin = 80", 1),
-		"bad key":      strings.Replace(awgConf(), key1, "abc", 1),
-		"no endpoint":  strings.Replace(awgConf(), "Endpoint = vpn.example.com:51820\n", "", 1),
-		"two peers":    awgConf() + "[Peer]\nPublicKey = " + key2 + "\n",
-		"bad section":  awgConf() + "[Other]\n",
-		"bad mtu":      strings.Replace(awgConf(), "MTU = 1380", "MTU = 9000", 1),
+		"unknown key": strings.Replace(awgConf(), "MTU = 1380", "Foo = 1", 1),
+		"bad H range": strings.Replace(awgConf(), "H3 = 300000", "H3 = 9-1", 1),
+		"jmin > jmax": strings.Replace(awgConf(), "Jmin = 40", "Jmin = 80", 1),
+		"bad key":     strings.Replace(awgConf(), key1, "abc", 1),
+		"no endpoint": strings.Replace(awgConf(), "Endpoint = vpn.example.com:51820\n", "", 1),
+		"two peers":   awgConf() + "[Peer]\nPublicKey = " + key2 + "\n",
+		"bad section": awgConf() + "[Other]\n",
+		"bad mtu":     strings.Replace(awgConf(), "MTU = 1380", "MTU = 9000", 1),
 	}
 	for name, in := range cases {
 		if _, err := Parse(in); err == nil {
@@ -151,12 +151,12 @@ func TestVLESSPolicies(t *testing.T) {
 		t.Fatalf("vless+tls must be manual-only, got %s", p.Transports[0].Policy)
 	}
 	for name, bad := range map[string]string{
-		"no pbk":        strings.Replace(realityURL, "pbk=", "x=", 1),
-		"bad sid":       strings.Replace(realityURL, "sid=6ba85179e30d4fc2", "sid=xyz", 1),
-		"bad uuid":      strings.Replace(realityURL, uuid, "nope", 1),
-		"vision+xhttp":  strings.Replace(realityURL, "type=tcp", "type=xhttp", 1),
-		"encryption":    strings.Replace(realityURL, "encryption=none", "encryption=mlkem", 1),
-		"unknown flow":  strings.Replace(realityURL, "xtls-rprx-vision", "xtls-rprx-direct", 1),
+		"no pbk":       strings.Replace(realityURL, "pbk=", "x=", 1),
+		"bad sid":      strings.Replace(realityURL, "sid=6ba85179e30d4fc2", "sid=xyz", 1),
+		"bad uuid":     strings.Replace(realityURL, uuid, "nope", 1),
+		"vision+xhttp": strings.Replace(realityURL, "type=tcp", "type=xhttp", 1),
+		"encryption":   strings.Replace(realityURL, "encryption=none", "encryption=mlkem", 1),
+		"unknown flow": strings.Replace(realityURL, "xtls-rprx-vision", "xtls-rprx-direct", 1),
 	} {
 		if _, err := Parse(bad); err == nil {
 			t.Errorf("%s: expected error", name)

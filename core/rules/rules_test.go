@@ -49,15 +49,15 @@ func TestIDN(t *testing.T) {
 
 func TestInvalid(t *testing.T) {
 	for in, want := range map[string]error{
-		"":                ErrEmpty,
-		"1.2.3.4":         ErrIPAddress,
-		"10.0.0.0/8":      ErrIPAddress,
-		"[::1]":           ErrIPAddress,
-		"bad_domain!.com": ErrInvalid,
-		"full:localhost":  ErrInvalid,
-		"api.ipify.org":   ErrProtected,
-		"ipify.org":       ErrProtected,
-		"com":             ErrProtected, // covers icanhazip.com
+		"":                  ErrEmpty,
+		"1.2.3.4":           ErrIPAddress,
+		"10.0.0.0/8":        ErrIPAddress,
+		"[::1]":             ErrIPAddress,
+		"bad_domain!.com":   ErrInvalid,
+		"full:localhost":    ErrInvalid,
+		"api.ipify.org":     ErrProtected,
+		"ipify.org":         ErrProtected,
+		"com":               ErrProtected, // covers icanhazip.com
 		"stun.l.google.com": ErrProtected,
 	} {
 		if _, err := ParseRule(in); !errors.Is(err, want) {
