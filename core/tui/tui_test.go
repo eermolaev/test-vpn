@@ -261,11 +261,13 @@ func TestSettingsDialog(t *testing.T) {
 	run(m, key("down"))  // -> LAN
 	run(m, key("down"))  // -> connect on startup
 	run(m, key("right")) // last -> restore
-	if !strings.Contains(checkGeometry(t, m, 120, 40), "restore previous state") {
-		t.Fatal("auto-connect row not shown")
+	run(m, key("down"))  // -> next profile after
+	run(m, key("right")) // 5 -> 10
+	if v := checkGeometry(t, m, 120, 40); !strings.Contains(v, "restore previous state") || !strings.Contains(v, "10 failed attempts") {
+		t.Fatal("auto-connect or failover row not shown")
 	}
 	run(m, key("ctrl+s"))
-	if got := strings.Join(be.settings.DNSServers, ","); got != "1.1.1.1,1.0.0.1" || be.settings.BlockQUIC || be.settings.AutoConnect != daemon.AutoConnectRestore {
+	if got := strings.Join(be.settings.DNSServers, ","); got != "1.1.1.1,1.0.0.1" || be.settings.BlockQUIC || be.settings.AutoConnect != daemon.AutoConnectRestore || be.settings.FailoverAttempts != 10 {
 		t.Fatalf("settings %+v", be.settings)
 	}
 	// Custom DNS with validation.

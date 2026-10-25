@@ -341,7 +341,7 @@ func (t *Tunnel) connect() (engine.Engine, error) {
 			lastErr = err
 			c := errclass.Classify(err)
 			t.logf("%s failed: %v", tr.ID(), err)
-			t.setStatus(func(s *Status) { s.ErrorClass, s.ErrorMessage = c, c.Message() })
+			t.setStatus(func(s *Status) { s.ErrorClass, s.ErrorMessage = c, c.Message(); s.Failures++ })
 			continue
 		}
 		t.mu.Lock()
@@ -352,6 +352,7 @@ func (t *Tunnel) connect() (engine.Engine, error) {
 		t.router.SetEngine(e)
 		t.setStatus(func(s *Status) {
 			s.State, s.Since, s.ErrorClass, s.ErrorMessage = StateConnected, time.Now(), errclass.None, ""
+			s.Failures = 0
 		})
 		t.logf("connected via %s", tr.ID())
 		return e, nil

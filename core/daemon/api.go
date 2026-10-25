@@ -41,6 +41,25 @@ type Settings struct {
 	AllowLAN         bool     `json:"allowLAN"`
 	// AutoConnect: what to do when the Mac boots (AutoConnect* constants).
 	AutoConnect string `json:"autoConnect,omitempty"`
+	// FailoverAttempts: after this many failed connection attempts the
+	// daemon switches to the next profile. 0 means DefaultFailoverAttempts,
+	// a negative value turns failover off.
+	FailoverAttempts int `json:"failoverAttempts,omitempty"`
+}
+
+// DefaultFailoverAttempts is used when Settings.FailoverAttempts is 0.
+const DefaultFailoverAttempts = 5
+
+// Failover returns the number of failed attempts before switching profiles,
+// or 0 if failover is off.
+func (s Settings) Failover() int {
+	switch {
+	case s.FailoverAttempts == 0:
+		return DefaultFailoverAttempts
+	case s.FailoverAttempts < 0:
+		return 0
+	}
+	return s.FailoverAttempts
 }
 
 // AutoConnect modes.

@@ -88,6 +88,15 @@ Settings (`s`) → "Connect on startup", or `testvpn autoconnect MODE`:
 A restart of the service within the same boot (crash, `sudo testvpn install`)
 always restores the previous state, so a crash never lifts the kill switch.
 
+## Switching to another profile
+
+With several profiles, the VPN moves to the next one (in import order, round
+robin) after 5 failed connection attempts in a row, or when a profile has
+tried all its transports. The kill switch stays on while it switches, and the
+new profile becomes the selected one. Change the limit in Settings (`s`) →
+"Next profile after" or with `testvpn failover N|off`. With a single profile
+a failed tunnel is retried every 30 seconds.
+
 ## How traffic is protected
 
 - **Kill switch (pf).** When you connect, rules are loaded into the pf

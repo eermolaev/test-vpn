@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,6 +53,8 @@ usage:
   testvpn autoconnect last|restore|off
                           on boot: connect to the last profile / only if it was
                           connected / never
+  testvpn failover N|off  switch to the next profile after N failed attempts
+                          (default 5)
   testvpn check           check exit IP, country and leaks
   sudo testvpn install    install and start the background service
   sudo testvpn uninstall  stop and remove the service (--purge also deletes profiles)
@@ -83,6 +86,8 @@ func main() {
 		err = importCmd(args)
 	case "autoconnect":
 		err = withClient(func(c *ipc.Client) error { return autoconnectCmd(c, args) })
+	case "failover":
+		err = withClient(func(c *ipc.Client) error { return failoverCmd(c, args) })
 	case "logs":
 		err = withClient(func(c *ipc.Client) error { return logsCmd(c, args) })
 	case "check":
@@ -162,6 +167,7 @@ func printStatus(c *ipc.Client) error {
 	var set daemon.Settings
 	if c.Call(daemon.CmdGetSettings, nil, &set) == nil {
 		fmt.Printf("on startup:  %s\n", set.AutoConnectMode())
+		fmt.Printf("failover:    %s\n", failoverText(set.Failover()))
 	}
 	fmt.Printf("dns:         %s\n", strings.Join(st.DNSServers, ", "))
 	if st.LastError != "" {
@@ -232,6 +238,36 @@ func logsCmd(c *ipc.Client, args []string) error {
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+func failoverText(n int) string {
+	if n == 0 {
+		return "off"
+	}
+	return fmt.Sprintf("next profile after %d failed attempts", n)
+}
+
+func failoverCmd(c *ipc.Client, args []string) error {
+	var s daemon.Settings
+	if err := c.Call(daemon.CmdGetSettings, nil, &s); err != nil {
+		return err
+	}
+	if len(args) == 0 {
+		fmt.Println(failoverText(s.Failover()))
+		return nil
+	}
+	if args[0] == "off" {
+		s.FailoverAttempts = -1
+	} else if n, err := strconv.Atoi(args[0]); err == nil && n > 0 {
+		s.FailoverAttempts = n
+	} else {
+		return fmt.Errorf("usage: testvpn failover N|off")
+	}
+	if err := c.Call(daemon.CmdSetSettings, s, nil); err != nil {
+		return err
+	}
+	fmt.Println("failover:", failoverText(s.Failover()))
+	return nil
 }
 
 func autoconnectCmd(c *ipc.Client, args []string) error {

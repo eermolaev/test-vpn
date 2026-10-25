@@ -59,6 +59,7 @@ type Daemon struct {
 	route     platform.DefaultRoute
 	since     time.Time
 	lastErr   string
+	lastRetry time.Time
 	ksOn      bool
 	stopMon   context.CancelFunc
 	profileID string
@@ -489,6 +490,10 @@ func (d *Daemon) monitor(ctx context.Context, s Settings) {
 			d.checkDirectLocked(cur)
 		}
 		d.plat.SetDNS(toAddrs(dnsServers(cur)))
+		if d.failoverLocked(cur) {
+			d.mu.Unlock()
+			return // the next profile runs its own monitor
+		}
 		if ticks++; ticks%15 == 0 {
 			d.checkConflictsLocked(d.tunName)
 			if d.directBroken != nil {
@@ -497,6 +502,51 @@ func (d *Daemon) monitor(ctx context.Context, s Settings) {
 		}
 		d.mu.Unlock()
 	}
+}
+
+// failoverLocked switches to the next profile once the current one has
+// failed Settings.Failover() times in a row (or gave up). The kill switch
+// stays on during the switch. With a single profile a failed tunnel is
+// retried instead. It reports whether the tunnel was replaced.
+func (d *Daemon) failoverLocked(s Settings) bool {
+	ts := d.tun.Status()
+	limit := s.Failover()
+	failed := ts.State == tunnel.StateFailed
+	if !failed && (limit == 0 || ts.Failures < limit) {
+		return false
+	}
+	profiles := d.st.view().Profiles
+	if len(profiles) < 2 || limit == 0 {
+		if failed && time.Since(d.lastRetry) >= 30*time.Second {
+			d.lastRetry = time.Now()
+			d.tun.Reconnect()
+		}
+		return false
+	}
+	cur := 0
+	for i, p := range profiles {
+		if p.ID == d.profileID {
+			cur = i
+		}
+	}
+	d.teardownLocked(false)
+	from := profiles[cur].Name
+	for i := 1; i < len(profiles); i++ {
+		next := profiles[(cur+i)%len(profiles)]
+		d.logf("%s: %d failed attempts, switching to %s", from, ts.Failures, next.Name)
+		d.st.update(func(sd *storeData) error { sd.Selected = next.ID; return nil })
+		err := d.connectLocked(next, s)
+		if err == nil {
+			return true
+		}
+		// Fail closed, as in Connect, and try the one after.
+		d.plat.DestroyTUN()
+		d.lastErr = err.Error()
+		d.logf("connect failed: %v", err)
+		from = next.Name
+	}
+	d.logf("no profile could be started; traffic stays blocked until you connect again")
+	return true
 }
 
 // Reconnect re-checks the tunnel now.

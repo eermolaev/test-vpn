@@ -41,17 +41,20 @@ type Stats struct {
 // Status is reported to the app. TransportID contains the server endpoint and
 // must be redacted before logging.
 type Status struct {
-	State         State          `json:"state"`
-	TransportID   string         `json:"transportId,omitempty"`
-	TransportKind string         `json:"transportKind,omitempty"`
-	Attempt       int            `json:"attempt,omitempty"`
-	Round         int            `json:"round,omitempty"`
-	ErrorClass    errclass.Class `json:"errorClass,omitempty"`
-	ErrorMessage  string         `json:"errorMessage,omitempty"`
-	Since         time.Time      `json:"since"`
-	Exclusions    int            `json:"exclusions"`
-	DNSServers    []string       `json:"dnsServers"`
-	Stats         Stats          `json:"stats"`
+	State         State  `json:"state"`
+	TransportID   string `json:"transportId,omitempty"`
+	TransportKind string `json:"transportKind,omitempty"`
+	Attempt       int    `json:"attempt,omitempty"`
+	Round         int    `json:"round,omitempty"`
+	// Failures counts failed connection attempts since the tunnel was last
+	// up; the daemon uses it to switch to another profile.
+	Failures     int            `json:"failures,omitempty"`
+	ErrorClass   errclass.Class `json:"errorClass,omitempty"`
+	ErrorMessage string         `json:"errorMessage,omitempty"`
+	Since        time.Time      `json:"since"`
+	Exclusions   int            `json:"exclusions"`
+	DNSServers   []string       `json:"dnsServers"`
+	Stats        Stats          `json:"stats"`
 }
 
 // JSON encodes the status.

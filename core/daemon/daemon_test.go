@@ -362,3 +362,50 @@ func TestAutoConnectValidation(t *testing.T) {
 		t.Fatalf("default %q", s.AutoConnectMode())
 	}
 }
+
+func TestFailoverToNextProfile(t *testing.T) {
+	good := testenv.StartAWG(t, testenv.Obfuscation(), [4]byte{1, 2, 3, 4})
+	dead := *good.Client
+	dead.Peer.Endpoint = "127.0.0.1:9" // nothing answers there
+	e := startDaemon(t, t.TempDir())
+	var deadEntry, goodEntry ProfileEntry
+	if err := e.cl.Call(CmdImport, ImportArgs{Text: profile.FormatAWGConf(&dead)}, &deadEntry); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdImport, ImportArgs{Text: profile.FormatAWGConf(good.Client)}, &goodEntry); err != nil {
+		t.Fatal(err)
+	}
+	name := "good"
+	e.cl.Call(CmdUpdateProfile, UpdateProfile{ID: goodEntry.ID, Name: &name}, nil)
+	if err := e.cl.Call(CmdSetSettings, Settings{DNSServers: []string{testenv.AWGServerIP.String()}, FailoverAttempts: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdSelectProfile, IDArgs{ID: deadEntry.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdConnect, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := e.waitConnected(t)
+	if st.Profile == nil || st.Profile.ID != goodEntry.ID {
+		t.Fatalf("expected failover to the good profile: %+v", st.Profile)
+	}
+	if _, ks := e.plat.KillSwitchActive(); !ks {
+		t.Fatal("kill switch must stay on")
+	}
+	var logs []LogLine
+	e.cl.Call(CmdLogs, LogsArgs{}, &logs)
+	found := false
+	for _, l := range logs {
+		found = found || strings.Contains(l.Text, "switching to good")
+	}
+	if !found {
+		t.Fatal("failover must be logged")
+	}
+}
+
+func TestFailoverSettings(t *testing.T) {
+	if (Settings{}).Failover() != DefaultFailoverAttempts || (Settings{FailoverAttempts: -1}).Failover() != 0 || (Settings{FailoverAttempts: 3}).Failover() != 3 {
+		t.Fatal("Failover()")
+	}
+}
