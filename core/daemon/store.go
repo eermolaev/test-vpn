@@ -94,3 +94,13 @@ func (m memoryStore) Load() map[string]string {
 func (m memoryStore) Save(v map[string]string) {
 	m.s.update(func(d *storeData) error { d.Memory = v; return nil })
 }
+
+// ResetDesiredState marks the stored state as disconnected, so that a
+// restarted daemon does not block traffic again (used by `testvpn unblock`).
+func ResetDesiredState(dir string) error {
+	s, err := openStore(dir)
+	if err != nil {
+		return err
+	}
+	return s.update(func(d *storeData) error { d.Connected = false; return nil })
+}

@@ -28,7 +28,7 @@ type fakeBackend struct {
 	statusErr error
 }
 
-func (f *fakeBackend) Status() (daemon.Status, error) { return f.st, f.statusErr }
+func (f *fakeBackend) Status() (daemon.Status, error)           { return f.st, f.statusErr }
 func (f *fakeBackend) Flows(int) ([]flowrouter.FlowInfo, error) { return f.flows, nil }
 func (f *fakeBackend) Logs(after uint64) ([]daemon.LogLine, error) {
 	if after > 0 {
@@ -49,11 +49,11 @@ func (f *fakeBackend) UpdateProfile(u daemon.UpdateProfile) error {
 	}
 	return nil
 }
-func (f *fakeBackend) DeleteProfile(string) error { f.calls = append(f.calls, "delete"); return nil }
-func (f *fakeBackend) SelectProfile(string) error { f.calls = append(f.calls, "select"); return nil }
-func (f *fakeBackend) Connect() error             { f.calls = append(f.calls, "connect"); return nil }
-func (f *fakeBackend) Disconnect() error          { f.calls = append(f.calls, "disconnect"); return nil }
-func (f *fakeBackend) Reconnect() error           { f.calls = append(f.calls, "reconnect"); return nil }
+func (f *fakeBackend) DeleteProfile(string) error         { f.calls = append(f.calls, "delete"); return nil }
+func (f *fakeBackend) SelectProfile(string) error         { f.calls = append(f.calls, "select"); return nil }
+func (f *fakeBackend) Connect() error                     { f.calls = append(f.calls, "connect"); return nil }
+func (f *fakeBackend) Disconnect() error                  { f.calls = append(f.calls, "disconnect"); return nil }
+func (f *fakeBackend) Reconnect() error                   { f.calls = append(f.calls, "reconnect"); return nil }
 func (f *fakeBackend) Settings() (daemon.Settings, error) { return f.settings, nil }
 func (f *fakeBackend) SetSettings(s daemon.Settings) error {
 	if len(s.Exclusions) > 0 && s.Exclusions[0] == "fail.example" {
