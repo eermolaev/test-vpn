@@ -414,48 +414,32 @@ Direct-соединения — только IPv4 (IPv6 заблокирован
 
 ### 8.1. Модули
 
+Логика (маршрутизация, профили, резервирование, классификация ошибок, проверка выхода) реализована в Go-ядре: так один код работает на обеих платформах и покрывается тестами без устройств Apple. Swift-часть — тонкая обёртка: UI, настройки, Keychain, Network Extension.
+
 ```
-Security/
-├── ConnectionFallbackPolicy.swift   # SEC-NET-002/003/005: порядок, лимиты, запрет понижения защиты
-├── StrictRoutingPolicy.swift        # SEC-KILL-001: правила и исключения
-├── TrafficLeakMonitor.swift         # фоновые признаки утечек
-├── SecretRedactor.swift             # SEC-LOG-001
-└── EgressVerifier.swift             # оркестрация конвейера 5.2
+core/                                # Go-ядро → Vpncore.xcframework (gomobile)
+├── rules/          # SPLIT-001, SPLIT-005: исключения, защищённые домены проверок
+├── profile/        # импорт vless://, AmneziaWG .conf, vpn://, xray JSON; политики транспортов; SEC-LOG-001
+├── errclass/       # SEC-NET-004: классы ошибок
+├── fallback/       # SEC-NET-002/003/005: порядок, лимиты, запрет понижения защиты, память по сети
+├── sniff/          # SNI TLS и QUIC, HTTP Host
+├── netstack/       # userspace TCP/IP-стек (gVisor) поверх utun / callback
+├── flowrouter/     # SPLIT-002/004, SEC-KILL-001: direct / движок / сброс
+├── dnsintercept/   # GEO-004, SPLIT-003: перехват DNS, таблица IP → домен
+├── direct/         # сокеты через физический интерфейс (IPv4)
+├── engine/xray/    # xray-core: VLESS + REALITY (Vision, XHTTP)
+├── engine/awg/     # amneziawg-go в netstack-режиме
+├── tunnel/         # оркестратор: перебор транспортов, health check, kill switch, статус
+├── egress/         # GEO-001…009: IP выхода, GeoIP, STUN, IPv6, обход, обновление базы
+└── bridge/         # API для Swift (пакет vpncore)
 
-Network/
-├── ExitIPResolver.swift             # GEO-002: несколько источников, консенсус
-├── GeoIPProvider.swift              # GEO-008: локальная база + опциональные внешние
-├── DNSRouteVerifier.swift           # GEO-004
-├── DNSSettings.swift                # GEO-010: пресеты, свои адреса, валидация
-├── IPv6RouteVerifier.swift          # GEO-003
-├── WebRTCLeakVerifier.swift         # GEO-005
-├── BypassProbe.swift                # GEO-006
-├── ErrorClassifier.swift            # SEC-NET-004
-└── RoutingHealthCheck.swift         # проверочные запросы через туннель
-
-Routing/
-├── DomainRuleSet.swift              # SPLIT-001: формат, валидация, punycode, сопоставление
-├── ExclusionSettings.swift          # SPLIT-001/003/006: глобальный список, профиль, импорт/экспорт, App Group
-└── ProtectedDomains.swift           # SPLIT-005: домены проверок, которые нельзя исключать
-
-Diagnostics/
-└── DiagnosticReport.swift           # версии движков, коды ошибок, результаты проверок (без секретов)
-
-Platform/
-├── macOS/                           # UI, сборка app extension
-└── iOS/                             # UI, On Demand-правила, App Group (PLAT-001…004)
-
-core/                                # Go-ядро, xcframework для macOS и iOS (6.2)
-├── netstack/                        # userspace TCP/IP-стек поверх utun
-├── flowrouter/                      # SPLIT-002/004: выбор direct / движок / сброс
-├── sniff/                           # SNI TLS и QUIC, HTTP Host
-├── dnsintercept/                    # GEO-004, SPLIT-003: перехват DNS, таблица IP → домен
-├── direct/                          # исходящие сокеты через физический интерфейс (IPv4)
-├── engine_xray/                     # обёртка xray-core
-└── engine_awg/                      # обёртка amneziawg-go в netstack-режиме
+apple/
+├── Shared/         # модели, Keychain, App Group, сборка конфигурации ядра, сообщения app ↔ extension
+├── App/            # SwiftUI (iOS и macOS): профили, импорт и QR, исключения, DNS, диагностика
+└── PacketTunnel/   # NEPacketTunnelProvider: настройки utun, передача пакетов в ядро, мониторинг сети
 ```
 
-`EgressVerifier` не раскрывает секреты профиля сторонним сервисам и не блокирует UI: проверка выполняется асинхронно, результат кэшируется до следующего события сети.
+Проверка выхода (`egress`) выполняется в процессе приложения через туннель, не раскрывает секреты профиля сторонним сервисам и не блокирует UI.
 
 ### 8.2. Этапы реализации
 
@@ -538,3 +522,4 @@ iOS-сборка ведётся параллельно с этапа 1: кажд
 14. DNS по умолчанию — Google `8.8.8.8` / `8.8.4.4` с настройкой резолвера (GEO-010).
 15. Добавлена поддержка iOS 26+ (6.3, PLAT-001…004): общий код, бюджет памяти extension, On Demand, проверка через `rvictl`.
 16. Добавлены домены-исключения (6.4, SPLIT-001…006): единое Go-ядро с маршрутизатором (6.2), обновлены SEC-KILL-001, GEO-004, GEO-007, GEO-010, этапы, метрики и тесты.
+17. Раздел 8.1 приведён к фактической структуре реализации: логика в Go-ядре, Swift — обёртка.

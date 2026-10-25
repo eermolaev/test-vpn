@@ -1,0 +1,10 @@
+// Edit these two values before building (see docs/BUILD.md).
+// DEVELOPMENT_TEAM: your Apple Developer Team ID (paid membership is required
+// for the Network Extension entitlement).
+DEVELOPMENT_TEAM =
+// BUNDLE_PREFIX: a reverse-DNS prefix you own.
+BUNDLE_PREFIX = com.example.testvpn
+
+APP_BUNDLE_ID = $(BUNDLE_PREFIX).app
+TUNNEL_BUNDLE_ID = $(APP_BUNDLE_ID).tunnel
+APP_GROUP_ID = group.$(BUNDLE_PREFIX)

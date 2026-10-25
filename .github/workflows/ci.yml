@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core:
+    name: Go core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l core)"
+      - name: Test
+        run: ./scripts/test-core.sh
+      - name: Cross-compile for Darwin
+        working-directory: core
+        run: |
+          GOOS=darwin GOARCH=arm64 go vet ./...
+          GOOS=ios GOARCH=arm64 CGO_ENABLED=0 go build ./...
+
+  apple:
+    name: Apple app (unsigned build)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+          xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build Vpncore.xcframework
+        run: ./scripts/build-xcframework.sh
+      - name: Generate project
+        working-directory: apple
+        run: xcodegen generate
+      - name: Build iOS
+        working-directory: apple
+        run: >
+          xcodebuild -project VPN.xcodeproj -scheme VPNApp_iOS
+          -destination 'generic/platform=iOS' -configuration Debug
+          CODE_SIGNING_ALLOWED=NO build
+      - name: Build macOS
+        working-directory: apple
+        run: >
+          xcodebuild -project VPN.xcodeproj -scheme VPNApp_macOS
+          -destination 'generic/platform=macOS' -configuration Debug
+          CODE_SIGNING_ALLOWED=NO build
