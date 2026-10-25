@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"strconv"
@@ -32,6 +33,8 @@ type Options struct {
 	MonitorInterval time.Duration
 	// NoBind disables binding direct sockets to the physical interface (tests).
 	NoBind bool
+	// LogWriter also receives log lines (the launchd log file).
+	LogWriter io.Writer
 	// Tunnel overrides tunnel timing (tests).
 	TunePolicy func(*tunnel.Config)
 }
@@ -75,7 +78,16 @@ func New(opts Options) (*Daemon, error) {
 	return d, nil
 }
 
-func (d *Daemon) logf(format string, a ...any) { d.logs.add(fmt.Sprintf(format, a...)) }
+func (d *Daemon) logf(format string, a ...any) { d.log(fmt.Sprintf(format, a...)) }
+
+// log records a (redacted) line in the ring shown by the dashboard and, if
+// configured, in the service log file.
+func (d *Daemon) log(line string) {
+	d.logs.add(line)
+	if w := d.opts.LogWriter; w != nil {
+		fmt.Fprintf(w, "%s %s\n", time.Now().Format("2006-01-02 15:04:05"), line)
+	}
+}
 
 // Start restores the desired state after a (re)start: reconnect if the user
 // was connected — the kill switch from a crash stays active meanwhile — or
@@ -296,7 +308,7 @@ func (d *Daemon) connectLocked(sp storedProfile, s Settings) error {
 	}
 	t, err := tunnel.Start(pio, cfg, tunnel.Deps{
 		Memory: d.mem,
-		Logf:   func(l string) { d.logs.add(l) },
+		Logf:   d.log,
 		Direct: allowDialer{plat: d.plat, d: d.dial},
 	})
 	if err != nil {

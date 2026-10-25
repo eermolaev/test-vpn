@@ -51,7 +51,7 @@ func runDaemon() error {
 		owner = 0 // root only until installed by a user
 	}
 	plat := platform.NewDarwin(statePath(), nil)
-	d, err := daemon.New(daemon.Options{Dir: *stateDir, Platform: plat})
+	d, err := daemon.New(daemon.Options{Dir: *stateDir, Platform: plat, LogWriter: os.Stderr})
 	if err != nil {
 		return err
 	}

@@ -50,7 +50,8 @@ root only. The socket accepts only root and the user who ran `install`.
 | `q` | quit the dashboard (the VPN keeps running) |
 
 The command line works too: `testvpn status`, `testvpn connect`,
-`testvpn disconnect`, `testvpn import profile.conf`, `testvpn check`.
+`testvpn disconnect`, `testvpn import profile.conf`, `testvpn check`,
+`testvpn logs [-f]` (also written to `/Library/Logs/testvpn.log`).
 
 ## How traffic is protected
 

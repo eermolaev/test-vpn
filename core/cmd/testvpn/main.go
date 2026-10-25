@@ -48,6 +48,7 @@ usage:
   testvpn status          print the status
   testvpn connect | disconnect | reconnect
   testvpn import FILE     import a profile (- for stdin; --into ID to add transports)
+  testvpn logs [-f]       print the service log (-f: follow)
   testvpn check           check exit IP, country and leaks
   sudo testvpn install    install and start the background service
   sudo testvpn uninstall  stop and remove the service (--purge also deletes profiles)
@@ -77,6 +78,8 @@ func main() {
 		err = withClient(func(c *ipc.Client) error { return c.Call(daemon.CmdReconnect, nil, nil) })
 	case "import":
 		err = importCmd(args)
+	case "logs":
+		err = withClient(func(c *ipc.Client) error { return logsCmd(c, args) })
 	case "check":
 		err = withClient(checkCmd)
 	case "daemon":
@@ -201,4 +204,23 @@ func checkCmd(c *ipc.Client) error {
 	out, _ := json.MarshalIndent(res, "", "  ")
 	fmt.Println(string(out))
 	return nil
+}
+
+func logsCmd(c *ipc.Client, args []string) error {
+	follow := len(args) > 0 && args[0] == "-f"
+	var after uint64
+	for {
+		var lines []daemon.LogLine
+		if err := c.Call(daemon.CmdLogs, daemon.LogsArgs{After: after}, &lines); err != nil {
+			return err
+		}
+		for _, l := range lines {
+			fmt.Printf("%s %s\n", l.Time.Local().Format("15:04:05"), l.Text)
+			after = l.Seq
+		}
+		if !follow {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
 }
