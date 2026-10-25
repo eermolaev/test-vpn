@@ -53,6 +53,19 @@ The command line works too: `testvpn status`, `testvpn connect`,
 `testvpn disconnect`, `testvpn import profile.conf`, `testvpn check`,
 `testvpn logs [-f]` (also written to `/Library/Logs/testvpn.log`).
 
+## Connect on startup
+
+Settings (`s`) → "Connect on startup", or `testvpn autoconnect MODE`:
+
+| Mode | After the Mac boots |
+| --- | --- |
+| `last` (default) | connects to the last selected profile, even if you disconnected before shutting down |
+| `restore` | connects only if the VPN was on at shutdown |
+| `off` | stays disconnected |
+
+A restart of the service within the same boot (crash, `sudo testvpn install`)
+always restores the previous state, so a crash never lifts the kill switch.
+
 ## How traffic is protected
 
 - **Kill switch (pf).** When you connect, rules are loaded into the pf

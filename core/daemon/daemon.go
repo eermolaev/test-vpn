@@ -35,6 +35,8 @@ type Options struct {
 	NoBind bool
 	// DirectDialer overrides the dialer for direct connections (tests).
 	DirectDialer engine.Dialer
+	// BootTime returns the system boot time (tests); default: from the OS.
+	BootTime func() int64
 	// LogWriter also receives log lines (the launchd log file).
 	LogWriter io.Writer
 	// Tunnel overrides tunnel timing (tests).
@@ -74,6 +76,9 @@ func New(opts Options) (*Daemon, error) {
 	if opts.MonitorInterval == 0 {
 		opts.MonitorInterval = 2 * time.Second
 	}
+	if opts.BootTime == nil {
+		opts.BootTime = bootTime
+	}
 	st, err := openStore(opts.Dir)
 	if err != nil {
 		return nil, err
@@ -94,17 +99,42 @@ func (d *Daemon) log(line string) {
 	}
 }
 
-// Start restores the desired state after a (re)start: reconnect if the user
-// was connected — the kill switch from a crash stays active meanwhile — or
-// clean up leftovers otherwise.
+// Start decides whether to connect when the service starts.
+//
+// A restart within the same boot (crash, reinstall) restores the previous
+// state whatever the setting, so a crash never lifts the kill switch. After
+// a reboot the AutoConnect setting applies: "last" always connects to the
+// last selected profile, "restore" only if it was connected, "off" never.
 func (d *Daemon) Start() {
-	if d.st.view().Connected {
-		d.logf("restoring connection after restart")
+	v := d.st.view()
+	boot := d.opts.BootTime()
+	sameBoot := boot != 0 && v.BootTime == boot
+	connect := v.Connected
+	reason := "restoring connection after restart"
+	if !sameBoot {
+		switch v.Settings.AutoConnectMode() {
+		case AutoConnectLast:
+			connect, reason = true, "connecting to the last profile on startup"
+		case AutoConnectRestore:
+			reason = "restoring connection after reboot"
+		case AutoConnectOff:
+			connect = false
+		}
+	}
+	if connect {
+		if _, ok := d.profileByID(""); !ok {
+			d.logf("auto-connect skipped: no profile")
+			connect = false
+		}
+	}
+	if connect {
+		d.logf("%s", reason)
 		if err := d.Connect(""); err != nil {
-			d.logf("reconnect failed: %v", err)
+			d.logf("connect failed: %v", err)
 		}
 		return
 	}
+	d.st.update(func(s *storeData) error { s.Connected, s.BootTime = false, boot; return nil })
 	d.plat.RestoreDNS()
 	d.plat.SetServerRoutes(nil, platform.DefaultRoute{})
 	d.plat.DisableKillSwitch()
@@ -240,7 +270,8 @@ func (d *Daemon) Connect(id string) error {
 		return errors.New("no profile selected; import one first")
 	}
 	settings := d.st.view().Settings
-	d.st.update(func(s *storeData) error { s.Connected, s.Selected = true, sp.ID; return nil })
+	boot := d.opts.BootTime()
+	d.st.update(func(s *storeData) error { s.Connected, s.Selected, s.BootTime = true, sp.ID, boot; return nil })
 	err := d.connectLocked(sp, settings)
 	if err != nil {
 		// Fail closed: the kill switch stays until the user disconnects.
@@ -333,7 +364,8 @@ func (d *Daemon) connectLocked(sp storedProfile, s Settings) error {
 func (d *Daemon) Disconnect() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.st.update(func(s *storeData) error { s.Connected = false; return nil })
+	boot := d.opts.BootTime()
+	d.st.update(func(s *storeData) error { s.Connected, s.BootTime = false, boot; return nil })
 	d.teardownLocked(true)
 	d.logf("disconnected")
 	return nil
@@ -481,6 +513,13 @@ func (d *Daemon) Reconnect() error {
 func (d *Daemon) SetSettings(s Settings) error {
 	if s.ExclusionDNSMode == "" {
 		s.ExclusionDNSMode = tunnel.ExclusionDNSPublic
+	}
+	switch s.AutoConnect {
+	case "":
+		s.AutoConnect = AutoConnectLast
+	case AutoConnectLast, AutoConnectRestore, AutoConnectOff:
+	default:
+		return fmt.Errorf("autoConnect must be %s, %s or %s", AutoConnectLast, AutoConnectRestore, AutoConnectOff)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()

@@ -49,6 +49,9 @@ usage:
   testvpn connect | disconnect | reconnect
   testvpn import FILE     import a profile (- for stdin; --into ID to add transports)
   testvpn logs [-f]       print the service log (-f: follow)
+  testvpn autoconnect last|restore|off
+                          on boot: connect to the last profile / only if it was
+                          connected / never
   testvpn check           check exit IP, country and leaks
   sudo testvpn install    install and start the background service
   sudo testvpn uninstall  stop and remove the service (--purge also deletes profiles)
@@ -78,6 +81,8 @@ func main() {
 		err = withClient(func(c *ipc.Client) error { return c.Call(daemon.CmdReconnect, nil, nil) })
 	case "import":
 		err = importCmd(args)
+	case "autoconnect":
+		err = withClient(func(c *ipc.Client) error { return autoconnectCmd(c, args) })
 	case "logs":
 		err = withClient(func(c *ipc.Client) error { return logsCmd(c, args) })
 	case "check":
@@ -154,6 +159,10 @@ func printStatus(c *ipc.Client) error {
 		fmt.Printf("traffic:     tunnel %d B, direct %d B, %d active flows\n", s.BytesTunnelDown+s.BytesTunnelUp, s.BytesDirectDown+s.BytesDirectUp, s.ActiveFlows)
 	}
 	fmt.Printf("kill switch: %v\n", st.KillSwitch)
+	var set daemon.Settings
+	if c.Call(daemon.CmdGetSettings, nil, &set) == nil {
+		fmt.Printf("on startup:  %s\n", set.AutoConnectMode())
+	}
 	fmt.Printf("dns:         %s\n", strings.Join(st.DNSServers, ", "))
 	if st.LastError != "" {
 		fmt.Printf("error:       %s\n", st.LastError)
@@ -223,4 +232,21 @@ func logsCmd(c *ipc.Client, args []string) error {
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+func autoconnectCmd(c *ipc.Client, args []string) error {
+	var s daemon.Settings
+	if err := c.Call(daemon.CmdGetSettings, nil, &s); err != nil {
+		return err
+	}
+	if len(args) == 0 {
+		fmt.Println(s.AutoConnectMode())
+		return nil
+	}
+	s.AutoConnect = args[0]
+	if err := c.Call(daemon.CmdSetSettings, s, nil); err != nil {
+		return err
+	}
+	fmt.Println("on startup:", s.AutoConnect)
+	return nil
 }

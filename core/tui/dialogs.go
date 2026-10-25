@@ -137,6 +137,21 @@ var dnsPresets = []struct {
 	{"Custom", nil},
 }
 
+var autoModes = []struct{ mode, label string }{
+	{daemon.AutoConnectLast, "last profile"},
+	{daemon.AutoConnectRestore, "restore previous state"},
+	{daemon.AutoConnectOff, "off"},
+}
+
+func autoLabel(mode string) string {
+	for _, a := range autoModes {
+		if a.mode == mode {
+			return a.label
+		}
+	}
+	return mode
+}
+
 type settingsDialog struct {
 	s      daemon.Settings
 	preset int
@@ -168,6 +183,7 @@ const (
 	setCustom
 	setQUIC
 	setLAN
+	setAuto
 	setSave
 	setCount
 )
@@ -201,6 +217,18 @@ func (d *settingsDialog) Update(m *Model, msg tea.Msg) (bool, tea.Cmd) {
 			d.s.BlockQUIC = !d.s.BlockQUIC
 		case setLAN:
 			d.s.AllowLAN = !d.s.AllowLAN
+		case setAuto:
+			step := 1
+			if k == "left" {
+				step = len(autoModes) - 1
+			}
+			cur := 0
+			for i, a := range autoModes {
+				if a.mode == d.s.AutoConnectMode() {
+					cur = i
+				}
+			}
+			d.s.AutoConnect = autoModes[(cur+step)%len(autoModes)].mode
 		case setSave:
 			return d.save(m)
 		}
@@ -269,11 +297,14 @@ func (d *settingsDialog) View(m *Model, w, h int) string {
 	lines = append(lines,
 		row(setQUIC, "Block QUIC in VLESS", toggle(d.s.BlockQUIC)),
 		row(setLAN, "Allow local network", toggle(d.s.AllowLAN)),
+		row(setAuto, "Connect on startup", stMain.Render("◀ "+autoLabel(d.s.AutoConnectMode())+" ▶")),
 		"",
 		row(setSave, "", stKey.Render("[ save ]")),
 		"",
 		stDim.Render("  DNS queries go through the VPN to this resolver. Excluded domains"),
 		stDim.Render("  are resolved with it directly. Changes apply without reconnecting."),
+		stDim.Render("  Connect on startup applies after the Mac boots; a service restart"),
+		stDim.Render("  (crash, update) always restores the previous state."),
 	)
 	if d.err != "" {
 		lines = append(lines, "  "+stBad.Render(d.err))

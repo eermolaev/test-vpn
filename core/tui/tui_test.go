@@ -258,8 +258,14 @@ func TestSettingsDialog(t *testing.T) {
 	run(m, key("right")) // Google -> Cloudflare
 	run(m, key("down"))  // -> QUIC
 	run(m, key("enter")) // toggle off
+	run(m, key("down"))  // -> LAN
+	run(m, key("down"))  // -> connect on startup
+	run(m, key("right")) // last -> restore
+	if !strings.Contains(checkGeometry(t, m, 120, 40), "restore previous state") {
+		t.Fatal("auto-connect row not shown")
+	}
 	run(m, key("ctrl+s"))
-	if got := strings.Join(be.settings.DNSServers, ","); got != "1.1.1.1,1.0.0.1" || be.settings.BlockQUIC {
+	if got := strings.Join(be.settings.DNSServers, ","); got != "1.1.1.1,1.0.0.1" || be.settings.BlockQUIC || be.settings.AutoConnect != daemon.AutoConnectRestore {
 		t.Fatalf("settings %+v", be.settings)
 	}
 	// Custom DNS with validation.

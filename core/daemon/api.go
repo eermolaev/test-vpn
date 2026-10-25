@@ -36,11 +36,28 @@ type Settings struct {
 	ExclusionDNSMode string   `json:"exclusionDNSMode"`
 	BlockQUIC        bool     `json:"blockQUIC"`
 	AllowLAN         bool     `json:"allowLAN"`
+	// AutoConnect: what to do when the Mac boots (AutoConnect* constants).
+	AutoConnect string `json:"autoConnect,omitempty"`
+}
+
+// AutoConnect modes.
+const (
+	AutoConnectLast    = "last"    // always connect to the last selected profile
+	AutoConnectRestore = "restore" // connect only if connected before shutdown
+	AutoConnectOff     = "off"     // never connect automatically
+)
+
+// AutoConnectMode returns the mode, defaulting to AutoConnectLast.
+func (s Settings) AutoConnectMode() string {
+	if s.AutoConnect == "" {
+		return AutoConnectLast
+	}
+	return s.AutoConnect
 }
 
 // DefaultSettings returns the defaults.
 func DefaultSettings() Settings {
-	return Settings{ExclusionDNSMode: tunnel.ExclusionDNSPublic, BlockQUIC: true}
+	return Settings{ExclusionDNSMode: tunnel.ExclusionDNSPublic, BlockQUIC: true, AutoConnect: AutoConnectLast}
 }
 
 // ProfileEntry describes a stored profile without secrets.

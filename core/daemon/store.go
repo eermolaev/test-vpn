@@ -23,7 +23,8 @@ type storeData struct {
 	Profiles  []storedProfile   `json:"profiles"`
 	Selected  string            `json:"selected,omitempty"`
 	Settings  Settings          `json:"settings"`
-	Connected bool              `json:"connected"` // desired state, restored after restart
+	Connected bool              `json:"connected"`          // desired state, restored after restart
+	BootTime  int64             `json:"bootTime,omitempty"` // system boot when Connected was last set
 	Memory    map[string]string `json:"memory,omitempty"`
 }
 

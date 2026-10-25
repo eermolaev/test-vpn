@@ -36,12 +36,16 @@ func startDaemon(t *testing.T, dir string) *env {
 }
 
 func startDaemonWith(t *testing.T, dir string, directDialer engine.Dialer) *env {
+	return startDaemonBoot(t, dir, directDialer, nil)
+}
+
+func startDaemonBoot(t *testing.T, dir string, directDialer engine.Dialer, boot func() int64) *env {
 	t.Helper()
 	plat := platform.NewFake()
 	e := &env{plat: plat, client: make(chan *clientstack.Client, 4), dir: dir}
 	plat.OnCreate = func(app *netstack.PipeIO) { e.client <- clientstack.New(app) }
 	d, err := New(Options{
-		Dir: dir, Platform: plat, NoBind: true, MonitorInterval: 50 * time.Millisecond, DirectDialer: directDialer,
+		Dir: dir, Platform: plat, NoBind: true, MonitorInterval: 50 * time.Millisecond, DirectDialer: directDialer, BootTime: boot,
 		TunePolicy: func(c *tunnel.Config) {
 			c.Policy = fallback.Policy{Attempts: 1, FailTimeout: 3 * time.Second, BackoffBase: 10 * time.Millisecond, BackoffMax: 50 * time.Millisecond, MaxRounds: 1}
 		},
@@ -292,5 +296,69 @@ func TestBrokenDirectPathFallsBackToTunnel(t *testing.T) {
 	got := exchange(t, c, netip.AddrPortFrom(testenv.AWGServerIP, 7), tls)
 	if !strings.HasPrefix(got, "awg:") {
 		t.Fatal("excluded domain must go through the tunnel while the direct path is broken")
+	}
+}
+
+func TestAutoConnectOnStartup(t *testing.T) {
+	bootA := func() int64 { return 1000 }
+	bootB := func() int64 { return 2000 } // after a reboot
+
+	setup := func(t *testing.T, mode string, connected bool) string {
+		// A fresh server per case: daemons of earlier cases keep running
+		// with the same peer key until the test ends.
+		srv := testenv.StartAWG(t, testenv.Obfuscation(), [4]byte{1, 2, 3, 4})
+		dir := t.TempDir()
+		e := startDaemonBoot(t, dir, nil, bootA)
+		e.cl.Call(CmdImport, ImportArgs{Text: profile.FormatAWGConf(srv.Client)}, nil)
+		if err := e.cl.Call(CmdSetSettings, Settings{DNSServers: []string{testenv.AWGServerIP.String()}, AutoConnect: mode}, nil); err != nil {
+			t.Fatal(err)
+		}
+		e.cl.Call(CmdConnect, nil, nil)
+		e.waitConnected(t)
+		if !connected {
+			e.cl.Call(CmdDisconnect, nil, nil)
+		}
+		e.d.Shutdown()
+		return dir
+	}
+	started := func(t *testing.T, dir string, boot func() int64) bool {
+		e := startDaemonBoot(t, dir, nil, boot)
+		e.d.Start()
+		var st Status
+		e.cl.Call(CmdStatus, nil, &st)
+		_, ks := e.plat.KillSwitchActive()
+		return st.Connected && st.Tunnel != nil && ks
+	}
+
+	cases := []struct {
+		mode      string
+		connected bool
+		boot      func() int64
+		want      bool
+	}{
+		{AutoConnectLast, false, bootB, true},     // reboot: always connect
+		{AutoConnectRestore, false, bootB, false}, // reboot: was disconnected
+		{AutoConnectRestore, true, bootB, true},   // reboot: was connected
+		{AutoConnectOff, true, bootB, false},      // reboot: never
+		{AutoConnectOff, true, bootA, true},       // crash/restart: restore, fail closed
+		{AutoConnectLast, false, bootA, false},    // restart after manual disconnect
+	}
+	for _, c := range cases {
+		dir := setup(t, c.mode, c.connected)
+		if got := started(t, dir, c.boot); got != c.want {
+			t.Errorf("mode=%s connected=%v reboot=%v: connected=%v, want %v", c.mode, c.connected, c.boot() != 1000, got, c.want)
+		}
+	}
+}
+
+func TestAutoConnectValidation(t *testing.T) {
+	e := startDaemon(t, t.TempDir())
+	if err := e.cl.Call(CmdSetSettings, Settings{AutoConnect: "sometimes"}, nil); err == nil {
+		t.Fatal("unknown mode must be rejected")
+	}
+	var s Settings
+	e.cl.Call(CmdGetSettings, nil, &s)
+	if s.AutoConnectMode() != AutoConnectLast {
+		t.Fatalf("default %q", s.AutoConnectMode())
 	}
 }
