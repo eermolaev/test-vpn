@@ -56,6 +56,7 @@ type ProfileEntry struct {
 // Status is the daemon status shown by the TUI.
 type Status struct {
 	Version    string                `json:"version"`
+	Build      string                `json:"build"`
 	Connected  bool                  `json:"connected"` // desired state
 	Profile    *ProfileEntry         `json:"profile,omitempty"`
 	Tunnel     *tunnel.Status        `json:"tunnel,omitempty"`

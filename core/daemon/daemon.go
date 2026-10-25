@@ -435,7 +435,7 @@ func (d *Daemon) Status() Status {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	v := d.st.view()
-	st := Status{Version: Version, Connected: v.Connected, KillSwitch: d.ksOn, Interface: d.tunName, Route: d.route, Since: d.since, LastError: d.lastErr, DNSServers: dnsServers(v.Settings), Warnings: d.warnings}
+	st := Status{Version: Version, Build: Build(), Connected: v.Connected, KillSwitch: d.ksOn, Interface: d.tunName, Route: d.route, Since: d.since, LastError: d.lastErr, DNSServers: dnsServers(v.Settings), Warnings: d.warnings}
 	if sp, ok := d.profileByID(""); ok {
 		e := entry(sp, v.Selected)
 		st.Profile = &e

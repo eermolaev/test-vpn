@@ -88,7 +88,7 @@ func main() {
 	case "unblock":
 		err = unblock()
 	case "version", "-v", "--version":
-		fmt.Println(daemon.Version)
+		fmt.Println("testvpn", daemon.Build())
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -137,6 +137,7 @@ func printStatus(c *ipc.Client) error {
 	} else if st.Connected {
 		state = "blocked (tunnel down)"
 	}
+	fmt.Printf("service:     %s\n", st.Build)
 	fmt.Printf("state:       %s\n", state)
 	if st.Profile != nil {
 		fmt.Printf("profile:     %s\n", st.Profile.Name)

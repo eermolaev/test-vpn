@@ -119,6 +119,9 @@ func (m *Model) header(w int) string {
 	if st.KillSwitch {
 		right += stOK.Render("⛨ kill switch") + "  "
 	}
+	if st.Build != "" && w >= 110 {
+		right += stDim.Render(st.Build) + "  "
+	}
 	right += stDim.Render(m.now().Format("15:04:05")) + " "
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
 	return fit(left+strings.Repeat(" ", max(1, gap))+right, w)

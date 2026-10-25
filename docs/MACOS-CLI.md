@@ -24,6 +24,12 @@ sudo ./testvpn install      # copies to /usr/local/bin, starts the LaunchDaemon
 testvpn                     # opens the dashboard
 ```
 
+To update, rebuild and run `sudo ./testvpn install` again: it stops the
+running service, waits for it to exit, replaces the binary, starts the new
+service and prints its build (also shown by `testvpn status` and in the
+dashboard header). A connected VPN stays blocked during the swap and
+reconnects by itself.
+
 The service starts at boot (`/Library/LaunchDaemons/com.testvpn.daemon.plist`)
 and keeps running when the dashboard is closed. Profiles and settings are
 stored in `/Library/Application Support/TestVPN/config.json`, readable by

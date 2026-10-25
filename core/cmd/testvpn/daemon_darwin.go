@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/eermolaev/test-vpn/core/daemon"
 	"github.com/eermolaev/test-vpn/core/ipc"
@@ -120,6 +121,68 @@ func launchctl(args ...string) error {
 	return nil
 }
 
+const service = "system/" + label
+
+func serviceLoaded() bool { return exec.Command("launchctl", "print", service).Run() == nil }
+
+// daemonRunning reports whether any "testvpn daemon" process is alive.
+func daemonRunning() bool {
+	return exec.Command("pgrep", "-f", binPath+" daemon").Run() == nil
+}
+
+func waitUntil(timeout time.Duration, cond func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return true
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return cond()
+}
+
+// stopService unloads the LaunchDaemon and waits until the old process has
+// exited. On SIGTERM the daemon keeps the desired state, so a connected VPN
+// stays blocked (no leak) and the next daemon reconnects.
+func stopService() error {
+	if !serviceLoaded() && !daemonRunning() {
+		return nil
+	}
+	fmt.Println("stopping the running service…")
+	launchctl("bootout", service)
+	if waitUntil(15*time.Second, func() bool { return !serviceLoaded() && !daemonRunning() }) {
+		return nil
+	}
+	fmt.Println("the service did not stop in time; killing it")
+	launchctl("kill", "SIGKILL", service)
+	exec.Command("pkill", "-9", "-f", binPath+" daemon").Run()
+	launchctl("bootout", service)
+	if !waitUntil(5*time.Second, func() bool { return !serviceLoaded() && !daemonRunning() }) {
+		return errors.New("could not stop the running service; try: sudo launchctl bootout " + service)
+	}
+	return nil
+}
+
+// waitForService waits until the new daemon answers on its socket.
+func waitForService() (daemon.Status, error) {
+	var st daemon.Status
+	var lastErr error
+	ok := waitUntil(15*time.Second, func() bool {
+		c, err := ipc.Dial(*socketPath)
+		if err != nil {
+			lastErr = err
+			return false
+		}
+		defer c.Close()
+		lastErr = c.Call(daemon.CmdStatus, nil, &st)
+		return lastErr == nil
+	})
+	if !ok {
+		return st, fmt.Errorf("the service did not start (%v); see %s", lastErr, logPath)
+	}
+	return st, nil
+}
+
 func install() error {
 	if err := requireRoot(); err != nil {
 		return err
@@ -130,6 +193,9 @@ func install() error {
 	}
 	self, err := os.Executable()
 	if err != nil {
+		return err
+	}
+	if err := stopService(); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
@@ -150,12 +216,16 @@ func install() error {
 	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
 		return err
 	}
-	launchctl("bootout", "system/"+label) // ignore: may not be loaded
+	launchctl("enable", service)
 	if err := launchctl("bootstrap", "system", plistPath); err != nil {
 		return err
 	}
-	launchctl("enable", "system/"+label)
-	fmt.Println("installed: service", label, "is running; open the dashboard with: testvpn")
+	st, err := waitForService()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("installed: service %s is running, build %s\n", label, st.Build)
+	fmt.Println("open the dashboard with: testvpn")
 	return nil
 }
 
@@ -168,7 +238,9 @@ func uninstall(args []string) error {
 		c.Call(daemon.CmdDisconnect, nil, nil)
 		c.Close()
 	}
-	launchctl("bootout", "system/"+label)
+	if err := stopService(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning:", err)
+	}
 	os.Remove(plistPath)
 	os.Remove(*socketPath)
 	if err := platform.Unblock(statePath(), nil); err != nil {
