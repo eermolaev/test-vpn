@@ -11,9 +11,9 @@ import (
 
 // fakeRunner emulates scutil and pfctl and records commands.
 type fakeRunner struct {
-	cmds   []string
-	dns    map[string]string // key -> scutil show output
-	rules  string
+	cmds  []string
+	dns   map[string]string // key -> scutil show output
+	rules string
 }
 
 func newFakeRunner() *fakeRunner {

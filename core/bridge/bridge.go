@@ -6,12 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"net"
-	"net/http"
-	"net/netip"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -332,28 +327,9 @@ func RunEgressCheck(configJSON string) (string, error) {
 	if cfg.InterfaceIndex != 0 || cfg.InterfaceName != "" {
 		d := &direct.Dialer{}
 		d.SetInterface(cfg.InterfaceIndex, cfg.InterfaceName)
-		ec.BypassClient = bypassClient(d)
+		ec.BypassClient = egress.BoundClient(d)
 	}
 	return egress.Check(context.Background(), ec).JSON(), nil
-}
-
-// bypassClient sends HTTP requests through sockets bound to the physical
-// interface; with a correct kill switch they must fail (GEO-006).
-func bypassClient(d *direct.Dialer) *http.Client {
-	return &http.Client{Timeout: 6 * time.Second, Transport: &http.Transport{
-		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, err
-			}
-			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
-			if err != nil || len(ips) == 0 {
-				return nil, fmt.Errorf("resolve %s: %v", host, err)
-			}
-			p, _ := strconv.Atoi(port)
-			return d.DialTCP(ctx, netip.AddrPortFrom(ips[0], uint16(p)))
-		},
-	}}
 }
 
 // UpdateGeoIP downloads the DB-IP Lite Country database into dir and returns
