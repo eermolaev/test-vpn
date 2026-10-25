@@ -279,3 +279,15 @@ func TestRedaction(t *testing.T) {
 		t.Fatal("summary must not contain uuid")
 	}
 }
+
+func TestAmneziaSubscriptionKey(t *testing.T) {
+	key := makeAmneziaKey(t, map[string]any{
+		"name": "Amnezia Premium", "config_version": 2,
+		"api_config": map[string]any{"service_type": "amnezia-premium"},
+		"auth_data":  map[string]any{"api_key": "secret"},
+	})
+	_, err := ParseAmneziaKey(key)
+	if !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "Configuration files") {
+		t.Fatalf("subscription key: %v", err)
+	}
+}

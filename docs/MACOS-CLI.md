@@ -193,6 +193,13 @@ netstat -rn -f inet | grep utun       # only the TestVPN utun may hold 0/1 and 1
 
 ## Limitations
 
+- Amnezia **subscription keys** (Amnezia Premium / Free, `vpn://` keys
+  without servers) cannot be imported: the official app gets the servers
+  from Amnezia's gateway with credentials that only it has. In AmneziaVPN
+  open the server → "Configuration files" ("For router setup or the
+  AmneziaWG app"), download the `.conf` for a location and import that
+  file (`p` → `i` → `@~/Downloads/file.conf`, or `testvpn import file.conf`).
+
 - If DNS servers are set manually in System Settings → Network for the
   active interface, they take precedence over the override. Public resolvers
   still work (all DNS goes through the tunnel); a resolver in your local

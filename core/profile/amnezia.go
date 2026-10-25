@@ -21,7 +21,18 @@ type amneziaKey struct {
 	DNS1             string                       `json:"dns1"`
 	DNS2             string                       `json:"dns2"`
 	HostName         string                       `json:"hostName"`
+	// Subscription keys (Amnezia Premium / Free) carry no server config,
+	// only credentials for the Amnezia gateway.
+	ConfigVersion int             `json:"config_version"`
+	AuthData      json.RawMessage `json:"auth_data"`
+	APIEndpoint   string          `json:"api_endpoint"`
 }
+
+// amneziaSubscriptionHelp explains why subscription keys cannot be imported.
+const amneziaSubscriptionHelp = "amnezia: this is a subscription key (Amnezia Premium/Free): it holds no server settings, " +
+	"only credentials for Amnezia's gateway, which only the official app can use. " +
+	"In AmneziaVPN open the server → \"Configuration files\" (\"For router setup or the AmneziaWG app\"), " +
+	"download the .conf for a location and import that file"
 
 type amneziaProto struct {
 	LastConfig string `json:"last_config"`
@@ -46,6 +57,9 @@ func ParseAmneziaKey(s string) (*Profile, error) {
 	var key amneziaKey
 	if err := json.Unmarshal(data, &key); err != nil {
 		return nil, invalid("amnezia: json: %v", err)
+	}
+	if len(key.Containers) == 0 && (key.ConfigVersion != 0 || len(key.AuthData) > 0 || key.APIEndpoint != "") {
+		return nil, unsupported(amneziaSubscriptionHelp)
 	}
 	p := &Profile{Name: key.Description}
 	for _, d := range []string{key.DNS1, key.DNS2} {
