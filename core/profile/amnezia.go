@@ -31,8 +31,8 @@ type amneziaKey struct {
 // amneziaSubscriptionHelp explains why subscription keys cannot be imported.
 const amneziaSubscriptionHelp = "amnezia: this is a subscription key (Amnezia Premium/Free): it holds no server settings, " +
 	"only credentials for Amnezia's gateway, which only the official app can use. " +
-	"In AmneziaVPN open the server → \"Configuration files\" (\"For router setup or the AmneziaWG app\"), " +
-	"download the .conf for a location and import that file"
+	"With Amnezia Premium: in AmneziaVPN open Settings → Servers → your subscription server → \"Configuration files\", " +
+	"download the .conf for a location and import that file. Amnezia Free has no configuration files"
 
 type amneziaProto struct {
 	LastConfig string `json:"last_config"`
