@@ -8,10 +8,13 @@ struct ImportView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let target: UUID?
+
+    /// One fileImporter per view: SwiftUI ignores all but one.
+    enum FileMode { case config, qrImage }
     @State private var text = ""
     @State private var error: String?
-    @State private var importFile = false
-    @State private var importQRImage = false
+    @State private var fileMode: FileMode?
+    @State private var lastMode: FileMode = .config
     @State private var scanQR = false
 
     var body: some View {
@@ -33,8 +36,8 @@ struct ImportView: View {
                 Text("Supported: vless:// links (one per line), AmneziaWG .conf, Amnezia vpn:// keys, xray JSON.")
             }
             Section("Other sources") {
-                Button("Open file…") { importFile = true }
-                Button("QR code from image…") { importQRImage = true }
+                Button("Open file…") { lastMode = .config; fileMode = .config }
+                Button("QR code from image…") { lastMode = .qrImage; fileMode = .qrImage }
                 #if os(iOS)
                 if DataScannerViewController.isSupported {
                     Button("Scan QR code") { scanQR = true }
@@ -53,14 +56,18 @@ struct ImportView: View {
                 Button("Import") { importText(text) }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .fileImporter(isPresented: $importFile, allowedContentTypes: [.plainText, .json, .data]) { result in
-            if case .success(let url) = result { text = read(url) ?? text }
-        }
-        .fileImporter(isPresented: $importQRImage, allowedContentTypes: [.image]) { result in
+        .fileImporter(isPresented: Binding(get: { fileMode != nil }, set: { if !$0 { fileMode = nil } }),
+                      allowedContentTypes: lastMode == .qrImage ? [.image] : [.plainText, .json, .data]) { result in
+            // The presentation binding may be reset before this runs.
+            let mode = lastMode
             guard case .success(let url) = result else { return }
-            let access = url.startAccessingSecurityScopedResource()
-            defer { if access { url.stopAccessingSecurityScopedResource() } }
-            if let code = QRDecoder.decode(url: url) { importText(code) } else { error = "No QR code found in the image." }
+            if mode == .qrImage {
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                if let code = QRDecoder.decode(url: url) { importText(code) } else { error = "No QR code found in the image." }
+            } else {
+                text = read(url) ?? text
+            }
         }
         #if os(iOS)
         .sheet(isPresented: $scanQR) {
