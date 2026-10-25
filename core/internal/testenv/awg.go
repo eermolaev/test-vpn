@@ -115,3 +115,6 @@ func hexKey(b []byte) string {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// Close stops the server (simulates a dead or blocked server).
+func (s *AWGServer) Close() { s.dev.Close() }

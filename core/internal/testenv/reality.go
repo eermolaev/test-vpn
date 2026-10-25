@@ -106,3 +106,10 @@ func StartReality(t testing.TB) *RealityServer {
 	xh.Port, xh.Network, xh.Path = xhttpPort, "xhttp", "/x"
 	return &RealityServer{Vision: &vision, XHTTP: &xh, inst: inst}
 }
+
+// Vision2ID returns the transport ID of the Vision inbound.
+func (s *RealityServer) Vision2ID() string {
+	t := profile.Transport{VLESS: s.Vision}
+	t.Validate()
+	return t.ID()
+}
