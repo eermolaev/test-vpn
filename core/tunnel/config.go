@@ -70,7 +70,9 @@ func (c *Config) defaults() {
 		c.HealthInterval = 30 * time.Second
 	}
 	if c.HealthTimeout == 0 {
-		c.HealthTimeout = 5 * time.Second
+		// A VLESS probe opens a new connection through REALITY; on a slow or
+		// throttled path that alone can take a few seconds.
+		c.HealthTimeout = 8 * time.Second
 	}
 	if c.HealthFailures == 0 {
 		c.HealthFailures = 2

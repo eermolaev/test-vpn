@@ -392,12 +392,21 @@ func (t *Tunnel) monitor(e engine.Engine) {
 	ticker := time.NewTicker(t.cfg.HealthInterval)
 	defer ticker.Stop()
 	failures := 0
+	lastDown := t.router.Stats.BytesTunnelDown.Load()
 	for {
+		woken := false
 		select {
 		case <-t.ctx.Done():
 			return
 		case <-ticker.C:
 		case <-t.wakeCh:
+			woken = true
+		}
+		// Data arriving from the tunnel already proves it works; probe only
+		// when it is idle or the user asked for a re-check.
+		if down := t.router.Stats.BytesTunnelDown.Load(); down != lastDown && !woken {
+			lastDown, failures = down, 0
+			continue
 		}
 		ctx, cancel := context.WithTimeout(t.ctx, t.cfg.HealthTimeout)
 		err := t.healthCheck(ctx, e)
@@ -405,6 +414,7 @@ func (t *Tunnel) monitor(e engine.Engine) {
 		if t.ctx.Err() != nil {
 			return
 		}
+		lastDown = t.router.Stats.BytesTunnelDown.Load()
 		if err == nil {
 			failures = 0
 			continue
@@ -426,44 +436,76 @@ func (t *Tunnel) monitor(e engine.Engine) {
 	}
 }
 
-// healthCheck sends a DNS query through the engine to the tunnel resolvers,
-// first over UDP and then over TCP: some VLESS servers do not relay UDP, and
-// TCP-only operation is still a working tunnel. Each attempt gets its own
-// share of the time budget. Any well-formed answer proves that traffic
-// passes the tunnel.
+// healthCheck sends DNS queries through the engine to the tunnel resolvers
+// over UDP and TCP at once: some VLESS servers do not relay UDP, and TCP-only
+// operation is still a working tunnel. All probes share the whole time
+// budget (each VLESS probe opens a new connection to the server, which can
+// take seconds on a slow path), and the first well-formed answer proves that
+// traffic passes the tunnel. Once UDP is known not to work for this engine,
+// only TCP is probed.
 func (t *Tunnel) healthCheck(ctx context.Context, e engine.Engine) error {
 	servers := t.resolverServers()
 	if len(servers) == 0 {
 		return errors.New("no DNS servers for health check")
 	}
-	budget := t.cfg.HealthTimeout
-	if dl, ok := ctx.Deadline(); ok {
-		budget = time.Until(dl)
+	networks := []string{"udp", "tcp"}
+	t.mu.Lock()
+	if t.udpWarned == e {
+		networks = []string{"tcp"}
 	}
-	slice := max(budget/time.Duration(2*len(servers)), time.Second)
-	var lastErr error
-	udpFailed := false
+	t.mu.Unlock()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan probeResult, len(servers)*len(networks))
 	for _, s := range servers {
-		for _, network := range []string{"udp", "tcp"} {
-			if ctx.Err() != nil {
-				break
-			}
-			pctx, cancel := context.WithTimeout(ctx, slice)
-			err := dnsProbe(pctx, e, network, s)
-			cancel()
-			if err == nil {
-				if network == "tcp" && udpFailed {
-					t.warnUDPOnce(e)
+		for _, network := range networks {
+			go func() {
+				err := dnsProbe(ctx, e, network, s)
+				if err != nil {
+					err = fmt.Errorf("dns %s %s: %w", network, s, err)
 				}
-				return nil
+				results <- probeResult{network, err}
+			}()
+		}
+	}
+	var lastErr error
+	for i := 0; i < cap(results); i++ {
+		r := <-results
+		if r.err == nil {
+			if r.network == "tcp" && len(networks) == 2 && !t.udpAnswers(results, cap(results)-i-1) {
+				t.warnUDPOnce(e)
 			}
-			if network == "udp" {
-				udpFailed = true
-			}
-			lastErr = fmt.Errorf("dns %s %s: %w", network, s, err)
+			return nil
+		}
+		if lastErr == nil || r.network == "tcp" {
+			lastErr = r.err // the TCP error says more about the tunnel
 		}
 	}
 	return errclass.Wrap(errclass.Routing, lastErr)
+}
+
+type probeResult struct {
+	network string
+	err     error
+}
+
+// udpAnswers waits briefly for a UDP probe to succeed after TCP did. UDP
+// usually answers first; one that is still silent a second later is taken as
+// not relayed, and later checks probe TCP only.
+func (t *Tunnel) udpAnswers(results <-chan probeResult, pending int) bool {
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for ; pending > 0; pending-- {
+		select {
+		case r := <-results:
+			if r.network == "udp" && r.err == nil {
+				return true
+			}
+		case <-timer.C:
+			return false
+		}
+	}
+	return false
 }
 
 func (t *Tunnel) warnUDPOnce(e engine.Engine) {
