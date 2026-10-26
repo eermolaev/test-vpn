@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
@@ -40,9 +41,63 @@ type Options struct {
 
 // Engine is a running AmneziaWG device.
 type Engine struct {
-	dev  *device.Device
-	tnet *netstack.Net
-	once sync.Once
+	dev    *device.Device
+	tnet   *netstack.Net
+	bind   *countingBind
+	recent *recentLog
+	once   sync.Once
+}
+
+// countingBind counts datagrams, so a failed handshake can tell a silent
+// server (UDP filtered, server down) from one whose replies we cannot parse.
+type countingBind struct {
+	conn.Bind
+	sent, received atomic.Int64
+}
+
+func (b *countingBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
+	fns, actual, err := b.Bind.Open(port)
+	for i, fn := range fns {
+		fns[i] = func(packets [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {
+			n, err := fn(packets, sizes, eps)
+			b.received.Add(int64(n))
+			return n, err
+		}
+	}
+	return fns, actual, err
+}
+
+func (b *countingBind) Send(bufs [][]byte, ep conn.Endpoint) error {
+	err := b.Bind.Send(bufs, ep)
+	if err == nil {
+		b.sent.Add(int64(len(bufs)))
+	}
+	return err
+}
+
+// recentLog keeps the last device log lines for error reports.
+type recentLog struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (r *recentLog) add(format string, a ...any) {
+	line := fmt.Sprintf(format, a...)
+	if strings.Contains(line, "Routine:") || strings.Contains(line, "UAPI:") {
+		return // lifecycle noise
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, line)
+	if len(r.lines) > 8 {
+		r.lines = r.lines[len(r.lines)-8:]
+	}
+}
+
+func (r *recentLog) String() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return strings.Join(r.lines, "; ")
 }
 
 func keyHex(b64 string) (string, error) {
@@ -182,14 +237,18 @@ func Start(ctx context.Context, c *profile.AWGConfig, opts Options) (*Engine, er
 	if bind == nil {
 		bind = conn.NewDefaultBind()
 	}
-	logger := device.NewLogger(device.LogLevelSilent, "")
-	if opts.Logf != nil {
-		logger = &device.Logger{
-			Verbosef: func(string, ...any) {},
-			Errorf:   func(f string, a ...any) { opts.Logf("awg: " + fmt.Sprintf(f, a...)) },
-		}
+	cb := &countingBind{Bind: bind}
+	recent := &recentLog{}
+	logger := &device.Logger{
+		Verbosef: recent.add,
+		Errorf: func(f string, a ...any) {
+			recent.add(f, a...)
+			if opts.Logf != nil {
+				opts.Logf("awg: " + fmt.Sprintf(f, a...))
+			}
+		},
 	}
-	dev := device.NewDevice(tunDev, bind, logger)
+	dev := device.NewDevice(tunDev, cb, logger)
 	if err := dev.IpcSet(uapi); err != nil {
 		dev.Close()
 		return nil, errclass.Wrap(errclass.Config, fmt.Errorf("awg config: %w", err))
@@ -199,7 +258,7 @@ func Start(ctx context.Context, c *profile.AWGConfig, opts Options) (*Engine, er
 		dev.Close()
 		return nil, errclass.Wrap(errclass.NoNetwork, err)
 	}
-	e := &Engine{dev: dev, tnet: tnet}
+	e := &Engine{dev: dev, tnet: tnet, bind: cb, recent: recent}
 	timeout := opts.HandshakeTimeout
 	if timeout == 0 {
 		timeout = 10 * time.Second
@@ -279,9 +338,13 @@ func (e *Engine) waitHandshake(ctx context.Context, timeout time.Duration) error
 			if errors.Is(ctx.Err(), context.Canceled) {
 				return errclass.Wrap(errclass.Canceled, ctx.Err())
 			}
-			// Either UDP is filtered or the obfuscation parameters differ;
-			// the server cannot tell us which (SEC-NET-004).
-			return errclass.Wrap(errclass.UDPTimeout, errors.New("awg: no handshake response"))
+			// No reply at all: UDP is filtered or the server is down. Replies
+			// we could not use: keys, obfuscation or AWG version differ.
+			sent, received := e.bind.sent.Load(), e.bind.received.Load()
+			if received == 0 {
+				return errclass.Wrap(errclass.UDPTimeout, fmt.Errorf("awg: no handshake response (sent %d packets, received 0)", sent))
+			}
+			return errclass.Wrap(errclass.AWGMismatch, fmt.Errorf("awg: server answered but the handshake failed (sent %d packets, received %d; %s)", sent, received, e.recent))
 		case <-t.C:
 		}
 	}

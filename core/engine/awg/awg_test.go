@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,11 +107,27 @@ func TestObfuscationMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("mismatched parameters must not connect")
 	}
-	if c := errclass.Classify(err); c != errclass.UDPTimeout {
-		t.Fatalf("class %s", c)
+	// The server drops packets it cannot parse, so for us it is silent.
+	if c := errclass.Classify(err); c != errclass.UDPTimeout || !strings.Contains(err.Error(), "received 0") {
+		t.Fatalf("class %s: %v", c, err)
 	}
 	if time.Since(start) > 3*time.Second {
 		t.Fatal("timeout not respected")
+	}
+}
+
+// TestResponseMismatch: the server answers, but the client expects another
+// response header, so it cannot use the reply.
+func TestResponseMismatch(t *testing.T) {
+	srv := testenv.StartAWG(t, testenv.Obfuscation(), [4]byte{1, 2, 3, 4})
+	client := *srv.Client
+	client.H2 = "999" // server sends 200000-200999
+	_, err := Start(context.Background(), &client, Options{HandshakeTimeout: 1500 * time.Millisecond})
+	if err == nil {
+		t.Fatal("mismatched parameters must not connect")
+	}
+	if c := errclass.Classify(err); c != errclass.AWGMismatch || strings.Contains(err.Error(), "received 0") {
+		t.Fatalf("class %s: %v", c, err)
 	}
 }
 
