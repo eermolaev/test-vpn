@@ -256,7 +256,7 @@ func TestUpdateSettings(t *testing.T) {
 	}
 	tun, _, _ := startTunnel(t, cfg, nil)
 	waitState(t, tun, StateConnected, 10*time.Second)
-	err := tun.UpdateSettings(Settings{Exclusions: []string{"ok.example", "1.2.3.4", "api.ipify.org"}, DNSServers: []string{"2001:4860::8888"}})
+	err := tun.UpdateSettings(Settings{Exclusions: []string{"ok.example", "2001:db8::1", "api.ipify.org"}, DNSServers: []string{"2001:4860::8888"}})
 	var serr *SettingsError
 	if !errors.As(err, &serr) || len(serr.Exclusions) != 2 || len(serr.Other) != 1 {
 		t.Fatalf("expected 3 problems, got %v", err)

@@ -1,5 +1,7 @@
 package rules
 
+import "net/netip"
+
 // Policy decides which hosts go directly and which through the tunnel.
 //
 //   - VPN is the list of domains that use the tunnel. Empty or "*" means
@@ -37,6 +39,17 @@ func (p Policy) Direct(host string) bool {
 	default:
 		return true // only listed domains use the VPN
 	}
+}
+
+// DirectAddr reports whether an address exclusion sends traffic to dst
+// directly. It is checked before domain rules: the user named this exact
+// destination. Self-check hosts still use the tunnel.
+func (p Policy) DirectAddr(dst netip.Addr, host string) bool {
+	if !p.Exclusions.MatchAddr(dst) {
+		return false
+	}
+	h := NormalizeHost(host)
+	return h == "" || !IsProtectedHost(h)
 }
 
 // Tunneled reports whether host must use the tunnel (the inverse of Direct

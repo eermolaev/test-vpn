@@ -170,6 +170,10 @@ func (r *Router) Decide(dst netip.AddrPort, host string, src Source) Decision {
 			}
 		}
 	}
+	// An excluded address goes direct whatever the name says.
+	if s.Policy().DirectAddr(dst.Addr(), d.Host) {
+		d.Route = Direct
+	}
 	if d.Route == Tunnel && r.Engine() == nil {
 		d.Route, d.Reason = Reject, "tunnel down"
 	}
@@ -216,13 +220,13 @@ func (r *Router) HandleTCP(c *netstack.TCPConn) {
 		r.serveDNSOverTCP(c)
 		return
 	}
-	// Without domain rules the name is not needed for routing: skip
-	// sniffing, which delays server-first protocols (SMTP, FTP) by up to
-	// sniffTimeout. The DNS cache still names the flow.
+	// Without domain rules, or for an excluded address, the name is not
+	// needed for routing: skip sniffing, which delays server-first protocols
+	// (SMTP, FTP) by up to sniffTimeout. The DNS cache still names the flow.
 	var prefix []byte
 	var host string
 	var proto sniff.Protocol
-	if s := r.settings.Load(); s.Exclusions.Len() > 0 || !s.TunnelOnly.FullTunnel() {
+	if s := r.settings.Load(); (s.Exclusions.Len() > 0 || !s.TunnelOnly.FullTunnel()) && !s.Exclusions.MatchAddr(c.Flow.Dst.Addr()) {
 		prefix, host, proto = sniffStream(c)
 	}
 	src := SourceNone

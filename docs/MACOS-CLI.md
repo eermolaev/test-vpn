@@ -42,7 +42,7 @@ root only. The socket accepts only root and the user who ran `install`.
 | `c` | connect / disconnect |
 | `r` | re-check the tunnel now |
 | `p` | profiles: `i` import (paste, or `@~/path/file.conf`), `a` add transports to the selected profile, `enter` select, `t` pin a transport, `n` rename, `g` expected country, `d` delete |
-| `e` | domain exclusions (`ctrl+s` saves) |
+| `e` | exclusions: domains, IPv4 addresses (`31.172.77.119`) and subnets (`31.172.77.0/24`); `ctrl+s` saves |
 | `v` | VPN list: which sites use the VPN (see [Which traffic uses the VPN](#which-traffic-uses-the-vpn)) |
 | `s` | settings: DNS (Google by default, Cloudflare, Quad9, custom), QUIC blocking, local network |
 | `x` | check exit IP, country and leaks |
@@ -71,6 +71,12 @@ Examples:
 - exclusions `ru`, VPN list `*` and `mail.ru`: `yandex.ru` direct, `e.mail.ru`
   through the VPN, everything else through the VPN;
 - exclusions empty, VPN list `youtube.com`: only YouTube uses the VPN.
+
+An address or subnet in exclusions (`31.172.77.119`, `10.20.0.0/16`) always
+goes direct, whatever name the connection has, and keeps working while the
+VPN is down; use it for SSH or other servers you reach by IP. IPv6 addresses
+are not supported (IPv6 is blocked). `ping` does not work through the
+client either way: only TCP and UDP are handled.
 
 Exit-IP check services always use the VPN. Traffic whose site cannot be
 identified follows the default: VPN with `*`, direct with a site list.

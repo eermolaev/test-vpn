@@ -3,6 +3,7 @@ package rules
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -50,9 +51,9 @@ func TestIDN(t *testing.T) {
 func TestInvalid(t *testing.T) {
 	for in, want := range map[string]error{
 		"":                  ErrEmpty,
-		"1.2.3.4":           ErrIPAddress,
-		"10.0.0.0/8":        ErrIPAddress,
-		"[::1]":             ErrIPAddress,
+		"[::1]":             ErrIPv6,
+		"2001:db8::/32":     ErrIPv6,
+		"1.2.3.4/33":        ErrInvalid,
 		"bad_domain!.com":   ErrInvalid,
 		"full:localhost":    ErrInvalid,
 		"api.ipify.org":     ErrProtected,
@@ -80,7 +81,7 @@ func TestBroadRuleKeepsProtectedInTunnel(t *testing.T) {
 }
 
 func TestListErrorsAndLimits(t *testing.T) {
-	_, errs := ParseList("# comment\nexample.com\n\nexample.com\n1.1.1.1\n")
+	_, errs := ParseList("# comment\nexample.com\n\nexample.com\n2001:db8::1\n")
 	if len(errs) != 2 || errs[0].Line != 4 || !errors.Is(errs[0].Err, ErrDuplicate) || errs[1].Line != 5 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -153,5 +154,38 @@ func TestPolicy(t *testing.T) {
 	}
 	if s := vpn("*"); s.Export() != "*\n" || !s.FullTunnel() {
 		t.Fatal("wildcard round trip")
+	}
+}
+
+func TestIPExclusions(t *testing.T) {
+	s, errs := NewSet([]string{"31.172.77.119", "10.20.0.0/16", "192.168.1.5/24", "example.com"})
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	for addr, want := range map[string]bool{
+		"31.172.77.119": true, "31.172.77.120": false,
+		"10.20.3.4": true, "10.21.0.1": false,
+		"192.168.1.200":        true, // the prefix is masked to 192.168.1.0/24
+		"::ffff:31.172.77.119": true,
+	} {
+		if got := s.MatchAddr(netip.MustParseAddr(addr)); got != want {
+			t.Errorf("MatchAddr(%s) = %v, want %v", addr, got, want)
+		}
+	}
+	if got := s.Export(); got != "31.172.77.119\n10.20.0.0/16\n192.168.1.0/24\nexample.com\n" {
+		t.Fatalf("export %q", got)
+	}
+	if s.Match("31.172.77.119") {
+		t.Fatal("an address rule must not match host names")
+	}
+	if _, errs := NewSet([]string{"31.172.77.119", "31.172.77.119/32"}); len(errs) != 1 || !errors.Is(errs[0].Err, ErrDuplicate) {
+		t.Fatalf("duplicate: %v", errs)
+	}
+	if _, err := ParseTunnelRule("31.172.77.119"); !errors.Is(err, ErrIPAddress) {
+		t.Fatalf("VPN list must reject addresses: %v", err)
+	}
+	p := Policy{Exclusions: s}
+	if !p.DirectAddr(netip.MustParseAddr("31.172.77.119"), "") || p.DirectAddr(netip.MustParseAddr("31.172.77.119"), "api.ipify.org") {
+		t.Fatal("DirectAddr")
 	}
 }

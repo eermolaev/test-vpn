@@ -137,7 +137,7 @@ func (t *Tunnel) logDialFailure(f netstack.Flow, proto string, d flowrouter.Deci
 		host = f.Dst.Addr().String()
 	}
 	route := "tunnel"
-	if t.router.Settings().Policy().Direct(d.Host) {
+	if p := t.router.Settings().Policy(); p.Direct(d.Host) || p.DirectAddr(f.Dst.Addr(), d.Host) {
 		route = "direct"
 	}
 	key := route + "|" + host

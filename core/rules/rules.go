@@ -1,5 +1,6 @@
-// Package rules implements the domain exclusion list (SPLIT-001) and the set
-// of protected hosts that must always go through the tunnel (SPLIT-005).
+// Package rules implements the exclusion list (domains, IPv4 addresses and
+// subnets; SPLIT-001) and the set of protected hosts that must always go
+// through the tunnel (SPLIT-005).
 package rules
 
 import (
@@ -24,6 +25,9 @@ const (
 	Full
 	// Wildcard ("*") matches every host; only allowed in the VPN list.
 	Wildcard
+	// IPPrefix matches destination addresses (an IPv4 address or subnet);
+	// only allowed in exclusions.
+	IPPrefix
 )
 
 const fullPrefix = "full:"
@@ -31,7 +35,8 @@ const fullPrefix = "full:"
 // Rule is a single normalized exclusion entry.
 type Rule struct {
 	Kind   Kind
-	Domain string // lower-case ASCII (punycode), no trailing dot
+	Domain string       // lower-case ASCII (punycode), no trailing dot
+	Prefix netip.Prefix // IPPrefix rules
 }
 
 // String returns the canonical textual form of the rule.
@@ -41,6 +46,11 @@ func (r Rule) String() string {
 		return fullPrefix + r.Domain
 	case Wildcard:
 		return "*"
+	case IPPrefix:
+		if r.Prefix.IsSingleIP() {
+			return r.Prefix.Addr().String()
+		}
+		return r.Prefix.String()
 	}
 	return r.Domain
 }
@@ -52,13 +62,16 @@ func (r Rule) Matches(host string) bool {
 		return host == r.Domain
 	case Wildcard:
 		return true
+	case IPPrefix:
+		return false // matches addresses, see Set.MatchAddr
 	}
 	return host == r.Domain || strings.HasSuffix(host, "."+r.Domain)
 }
 
 var (
 	ErrEmpty     = errors.New("empty rule")
-	ErrIPAddress = errors.New("IP addresses are not supported, use a domain name")
+	ErrIPAddress = errors.New("IP addresses are only supported in exclusions")
+	ErrIPv6      = errors.New("IPv6 addresses are not supported (IPv6 is blocked)")
 	ErrInvalid   = errors.New("invalid domain name")
 	ErrProtected = errors.New("domain is used for VPN self-checks and cannot be excluded")
 	ErrTooMany   = fmt.Errorf("too many rules (maximum %d)", MaxRules)
@@ -92,9 +105,14 @@ func NormalizeHost(host string) string {
 //	example.com        domain and all subdomains
 //	*.example.com      same as above
 //	full:example.com   exact domain only
+//	203.0.113.7        this IPv4 address
+//	203.0.113.0/24     this IPv4 subnet
 func ParseRule(s string) (Rule, error) {
 	if strings.TrimSpace(s) == "*" {
 		return Rule{}, ErrWildcard
+	}
+	if r, ok, err := parseIPRule(s); ok {
+		return r, err
 	}
 	r, err := parseRule(s)
 	if err == nil && IsProtectedRule(r) {
@@ -110,6 +128,23 @@ func ParseTunnelRule(s string) (Rule, error) {
 		return Rule{Kind: Wildcard}, nil
 	}
 	return parseRule(s)
+}
+
+// parseIPRule parses an address or subnet; ok is false if s is neither.
+func parseIPRule(s string) (Rule, bool, error) {
+	s = strings.Trim(strings.TrimSpace(s), "[]")
+	var p netip.Prefix
+	if a, err := netip.ParseAddr(s); err == nil {
+		p = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
+	} else if pr, err := netip.ParsePrefix(s); err == nil {
+		p = pr.Masked()
+	} else {
+		return Rule{}, false, nil
+	}
+	if !p.Addr().Is4() {
+		return Rule{}, true, ErrIPv6
+	}
+	return Rule{Kind: IPPrefix, Prefix: p}, true, nil
 }
 
 func parseRule(s string) (Rule, error) {
@@ -142,6 +177,7 @@ type Set struct {
 	full     map[string]struct{}
 	suffix   map[string]struct{}
 	wildcard bool
+	prefixes []netip.Prefix
 	rules    []Rule
 }
 
@@ -205,6 +241,14 @@ func (s *Set) has(r Rule) bool {
 	if r.Kind == Wildcard {
 		return s.wildcard
 	}
+	if r.Kind == IPPrefix {
+		for _, p := range s.prefixes {
+			if p == r.Prefix {
+				return true
+			}
+		}
+		return false
+	}
 	if r.Kind == Full {
 		_, ok := s.full[r.Domain]
 		return ok
@@ -216,6 +260,8 @@ func (s *Set) has(r Rule) bool {
 func (s *Set) add(r Rule) {
 	if r.Kind == Wildcard {
 		s.wildcard = true
+	} else if r.Kind == IPPrefix {
+		s.prefixes = append(s.prefixes, r.Prefix)
 	} else if r.Kind == Full {
 		s.full[r.Domain] = struct{}{}
 	} else {
@@ -258,6 +304,20 @@ func (s *Set) Match(host string) bool {
 		return false
 	}
 	return s.matchNormalized(h)
+}
+
+// MatchAddr reports whether an address rule covers the destination address.
+func (s *Set) MatchAddr(a netip.Addr) bool {
+	if s == nil {
+		return false
+	}
+	a = a.Unmap()
+	for _, p := range s.prefixes {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // Covers reports whether a rule covers host (no protected-host exception);

@@ -116,7 +116,7 @@ func TestDaemonEndToEnd(t *testing.T) {
 	if err := e.cl.Call(CmdSetSettings, settings, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.cl.Call(CmdSetSettings, Settings{Exclusions: []string{"1.2.3.4"}}, nil); err == nil {
+	if err := e.cl.Call(CmdSetSettings, Settings{Exclusions: []string{"2001:db8::1"}}, nil); err == nil {
 		t.Fatal("invalid settings must be rejected")
 	}
 	if err := e.cl.Call(CmdConnect, nil, nil); err != nil {

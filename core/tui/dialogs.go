@@ -50,7 +50,7 @@ func (helpDialog) View(m *Model, w, h int) string {
 		{"c", "connect / disconnect"},
 		{"r", "re-check the tunnel now"},
 		{"p", "profiles: import, select, pin transport, expected country"},
-		{"e", "domain exclusions (bypass the VPN)"},
+		{"e", "exclusions: domains, IPv4 addresses and subnets (bypass the VPN)"},
 		{"v", "VPN list: * = everything, or only the listed sites use the VPN"},
 		{"s", "settings: DNS, QUIC, local network"},
 		{"x", "check exit IP, country and leaks"},
@@ -141,7 +141,7 @@ func (d *exclusionsDialog) View(m *Model, w, h int) string {
 	d.ta.SetWidth(w - 4)
 	d.ta.SetHeight(h - 8)
 	_, errs := d.parse()
-	title, intro := "exclusions", "Traffic to these domains bypasses the VPN; the sites see your real IP."
+	title, intro := "exclusions", "Traffic to these domains and addresses bypasses the VPN; they see your real IP."
 	if d.kind == listVPNOnly {
 		title, intro = "vpn list", "Sites that use the VPN and are blocked while it is down. * or an empty list = everything except exclusions; otherwise everything else goes direct. The more specific rule wins over exclusions."
 	}
@@ -155,6 +155,9 @@ func (d *exclusionsDialog) View(m *Model, w, h int) string {
 		status = stBad.Render(d.err)
 	}
 	syntax := "   example.com = with subdomains, full:x = exact"
+	if d.kind != listVPNOnly {
+		syntax += ", 1.2.3.4 or 1.2.3.0/24 = address"
+	}
 	if d.kind == listVPNOnly {
 		syntax += ", * = everything"
 	}

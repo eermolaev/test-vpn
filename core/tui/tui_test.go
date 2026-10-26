@@ -242,9 +242,9 @@ func TestExclusionsDialog(t *testing.T) {
 	}
 	// Invalid entries keep the dialog open with an error.
 	run(m, key("e"))
-	typeText(m, "\n1.2.3.4")
+	typeText(m, "\n2001:db8::1")
 	run(m, key("ctrl+s"))
-	if m.dialog == nil || !strings.Contains(checkGeometry(t, m, 120, 40), "IP addresses are not supported") {
+	if m.dialog == nil || !strings.Contains(checkGeometry(t, m, 120, 40), "IPv6 addresses are not supported") {
 		t.Fatal("invalid list must not be saved")
 	}
 	run(m, key("esc"))

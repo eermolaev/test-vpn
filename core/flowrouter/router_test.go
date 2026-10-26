@@ -557,6 +557,36 @@ func TestTunnelOnlyWinsOverExclusions(t *testing.T) {
 	}
 }
 
+func TestAddressExclusions(t *testing.T) {
+	h := newHarness(t, nil, nil)
+	h.router.SetEngine(h.tunnel)
+	excl, errs := rules.NewSet([]string{"198.51.100.80", "198.51.100.96/28"})
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	h.router.SetSettings(Settings{Exclusions: excl})
+	ssh := []byte("SSH-2.0-OpenSSH_9.9\r\n")
+	if resp, _ := h.tcp(t, "198.51.100.80:22", ssh); path(resp) != "D" {
+		t.Fatal("excluded address must go direct")
+	}
+	if resp, _ := h.tcp(t, "198.51.100.100:22", ssh); path(resp) != "D" {
+		t.Fatal("excluded subnet must go direct")
+	}
+	if resp, _ := h.tcp(t, "198.51.100.81:22", ssh); path(resp) != "T" {
+		t.Fatal("other addresses must use the tunnel")
+	}
+	// The name on the connection does not matter for an excluded address...
+	h.cache.Put(netip.MustParseAddr("198.51.100.80"), "vpn-only.example", time.Minute)
+	if resp, _ := h.tcp(t, "198.51.100.80:22", ssh); path(resp) != "D" {
+		t.Fatal("address exclusion must win over the DNS name")
+	}
+	// ...and it keeps working while the tunnel is down.
+	h.router.SetEngine(nil)
+	if resp, _ := h.tcp(t, "198.51.100.80:22", ssh); path(resp) != "D" {
+		t.Fatal("excluded address must stay reachable while the tunnel is down")
+	}
+}
+
 func TestVPNListIncludeMode(t *testing.T) {
 	h := newHarness(t, nil, nil)
 	h.router.SetEngine(h.tunnel)
