@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/eermolaev/test-vpn/core/rules"
 	"strings"
 	"time"
 
@@ -196,7 +197,7 @@ func (m *Model) exitPanel(w, h int) string {
 		}
 	}
 	add("dns", strings.Join(st.DNSServers, ", "))
-	add("excluded", plural(len(m.settings.Exclusions), "domain"))
+	add("excluded", exclusionSummary(m.settings.Exclusions))
 	add("via vpn", vpnListSummary(m.settings.VPNOnly))
 	if st.Route.Interface != "" {
 		add("network", st.Route.Interface+" via "+st.Route.Gateway.String())
@@ -257,7 +258,26 @@ func (m *Model) exitPanel(w, h int) string {
 	return box("exit", "x", lines, w, h, boxExit)
 }
 
+// exclusionSummary counts domain and address rules, e.g. "17 domains, 2 addresses".
+func exclusionSummary(list []string) string {
+	domains, addrs := 0, 0
+	for _, e := range list {
+		if r, err := rules.ParseRule(e); err == nil && r.Kind == rules.IPPrefix {
+			addrs++
+		} else {
+			domains++
+		}
+	}
+	if addrs == 0 {
+		return plural(domains, "domain")
+	}
+	return plural(domains, "domain") + ", " + plural(addrs, "address")
+}
+
 func plural(n int, word string) string {
+	if n != 1 && strings.HasSuffix(word, "s") {
+		return fmt.Sprintf("%d %ses", n, word)
+	}
 	if n == 1 {
 		return fmt.Sprintf("1 %s", word)
 	}
