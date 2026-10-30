@@ -23,6 +23,9 @@ const (
 	TCPReset      Class = "tcp_reset"      // connection reset or refused
 	TCPTimeout    Class = "tcp_timeout"    // no SYN-ACK / connect timeout
 	TLS           Class = "tls_reality"    // TLS/REALITY handshake failed
+	TLSTimeout    Class = "tls_timeout"    // TCP connects, TLS handshake gets no answer
+	ServerClosed  Class = "server_closed"  // handshake works, server drops the proxy request
+	ServerSilent  Class = "server_silent"  // handshake works, nothing comes back through the server
 	AWGMismatch   Class = "awg_mismatch"   // server answers, obfuscation/version differs
 	Routing       Class = "routing"        // tunnel up, health check through it fails
 	Config        Class = "config"         // invalid profile or settings
@@ -121,6 +124,12 @@ func (c Class) Message() string {
 		return "The server did not respond in time."
 	case TLS:
 		return "The secure handshake with the server failed. Check the REALITY key, short ID and server name."
+	case TLSTimeout:
+		return "The server accepts connections, but the secure handshake gets no answer. A filter on this network may be cutting the connection, or the VPN service on the server is down."
+	case ServerClosed:
+		return "The secure handshake works, but the server closes the connection on the first request. It may not accept this user ID, or the account is disabled or expired."
+	case ServerSilent:
+		return "The secure handshake works, but no answer comes back through the server. The server may not reach the internet, or the connection is slowed down after the handshake."
 	case AWGMismatch:
 		return "The server answered, but AmneziaWG parameters or protocol version do not match."
 	case Routing:

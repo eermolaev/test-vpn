@@ -443,3 +443,57 @@ func TestDirectDialFailureIsLogged(t *testing.T) {
 		t.Fatalf("logged %d times: %v", n, logs)
 	}
 }
+
+// diagEngine passes no traffic and reports diag from Diagnose.
+type diagEngine struct {
+	failingDialer
+	diag error
+}
+
+func (diagEngine) Name() string    { return "vless-reality" }
+func (diagEngine) NativeUDP() bool { return false }
+func (diagEngine) Close() error    { return nil }
+func (e diagEngine) Diagnose(context.Context, netip.AddrPort) error {
+	return e.diag
+}
+
+func TestFailedHealthCheckIsDiagnosed(t *testing.T) {
+	cases := []struct {
+		diag    error
+		class   errclass.Class
+		logText string
+	}{
+		{errclass.Wrap(errclass.ServerSilent, errors.New("REALITY handshake 80ms; no answer")), errclass.ServerSilent, "server_silent: REALITY handshake 80ms; no answer (health check: routing: "},
+		{nil, errclass.Routing, "direct check through the server passed"},
+	}
+	for _, c := range cases {
+		vless := &profile.VLESSConfig{Address: "203.0.113.10", Port: 443, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Security: "reality", Network: "raw", SNI: "a.example", PublicKey: "k", ShortID: "ab"}
+		var logs []string
+		var mu sync.Mutex
+		tunEnd, _ := netstack.NewPipe(16)
+		tun, err := Start(tunEnd, Config{
+			Profile:  &profile.Profile{Transports: []profile.Transport{{VLESS: vless}}},
+			Settings: Settings{DNSServers: []string{"127.0.0.1"}},
+			Policy:   fastPolicy(),
+		}, Deps{
+			Starter: func(context.Context, profile.Transport) (engine.Engine, error) {
+				return diagEngine{diag: c.diag}, nil
+			},
+			Logf: func(s string) { mu.Lock(); logs = append(logs, s); mu.Unlock() },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		st := waitState(t, tun, StateFailed, 10*time.Second)
+		tun.Stop()
+		if st.ErrorClass != c.class || st.ErrorMessage != c.class.Message() {
+			t.Fatalf("status %q %q, want %s", st.ErrorClass, st.ErrorMessage, c.class)
+		}
+		mu.Lock()
+		joined := strings.Join(logs, "\n")
+		mu.Unlock()
+		if !strings.Contains(joined, c.logText) {
+			t.Fatalf("log lacks %q:\n%s", c.logText, joined)
+		}
+	}
+}

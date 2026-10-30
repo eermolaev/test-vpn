@@ -373,9 +373,33 @@ func (t *Tunnel) attempt(tr profile.Transport) (engine.Engine, error) {
 	}
 	if err := t.healthCheck(ctx, e); err != nil {
 		e.Close()
-		return nil, errclass.Wrap(timeoutClass(tr), err)
+		return nil, errclass.Wrap(timeoutClass(tr), t.diagnose(e, err))
 	}
 	return e, nil
+}
+
+// diagnoseTimeout bounds the stage-by-stage check after a failed health check.
+const diagnoseTimeout = 10 * time.Second
+
+// diagnose replaces a failed health check with the first failing stage the
+// engine finds (TCP, handshake, server answer), keeping the health error for
+// context. Engines without diagnostics return healthErr unchanged.
+func (t *Tunnel) diagnose(e engine.Engine, healthErr error) error {
+	d, ok := e.(engine.Diagnoser)
+	servers := t.resolverServers()
+	if !ok || len(servers) == 0 || t.ctx.Err() != nil {
+		return healthErr
+	}
+	ctx, cancel := context.WithTimeout(t.ctx, diagnoseTimeout)
+	defer cancel()
+	err := d.Diagnose(ctx, servers[0])
+	if t.ctx.Err() != nil {
+		return healthErr
+	}
+	if err == nil {
+		return fmt.Errorf("%w (a direct check through the server passed: the failure may be intermittent)", healthErr)
+	}
+	return fmt.Errorf("%w (health check: %v)", err, healthErr)
 }
 
 func timeoutClass(tr profile.Transport) errclass.Class {
@@ -428,9 +452,15 @@ func (t *Tunnel) monitor(e engine.Engine) {
 		t.mu.Lock()
 		t.eng = nil
 		t.mu.Unlock()
+		err = t.diagnose(e, err)
 		e.Close()
+		if t.ctx.Err() != nil {
+			return
+		}
+		c := errclass.Classify(err)
+		t.logf("tunnel dropped: %v", err)
 		t.setStatus(func(s *Status) {
-			s.State, s.Since, s.ErrorClass, s.ErrorMessage = StateReconnecting, time.Now(), errclass.Routing, errclass.Routing.Message()
+			s.State, s.Since, s.ErrorClass, s.ErrorMessage = StateReconnecting, time.Now(), c, c.Message()
 		})
 		return
 	}

@@ -25,3 +25,10 @@ type Engine interface {
 	NativeUDP() bool
 	Close() error
 }
+
+// Diagnoser is implemented by engines that can explain, stage by stage, why
+// traffic does not pass through the server. It returns nil when every stage
+// it can check works.
+type Diagnoser interface {
+	Diagnose(ctx context.Context, dns netip.AddrPort) error
+}

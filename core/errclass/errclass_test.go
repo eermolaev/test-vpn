@@ -55,7 +55,7 @@ func TestWrapKeepsInner(t *testing.T) {
 }
 
 func TestTimeoutIsNotBlocking(t *testing.T) {
-	for _, c := range []Class{UDPTimeout, TCPTimeout} {
+	for _, c := range []Class{UDPTimeout, TCPTimeout, TLSTimeout, ServerSilent} {
 		if strings.Contains(strings.ToLower(c.Message()), "blocked") {
 			t.Errorf("%s message claims blocking: %q", c, c.Message())
 		}

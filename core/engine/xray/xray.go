@@ -38,6 +38,7 @@ type Engine struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	name   string
+	cfg    *profile.VLESSConfig
 	once   sync.Once
 }
 
@@ -135,7 +136,7 @@ func Start(c *profile.VLESSConfig, logf func(string)) (*Engine, error) {
 	if c.Security == "tls" {
 		name = string(profile.KindVLESSTLS)
 	}
-	return &Engine{inst: inst, ctx: ctx, cancel: cancel, name: name}, nil
+	return &Engine{inst: inst, ctx: ctx, cancel: cancel, name: name, cfg: c}, nil
 }
 
 type logHandler func(string)
@@ -221,4 +222,9 @@ func (e *Engine) Close() error {
 		err = e.inst.Close()
 	})
 	return err
+}
+
+// Diagnose checks the server stage by stage (see the package function).
+func (e *Engine) Diagnose(ctx context.Context, dns netip.AddrPort) error {
+	return Diagnose(ctx, e.cfg, dns)
 }
