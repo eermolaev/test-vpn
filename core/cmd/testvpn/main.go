@@ -26,8 +26,10 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/term"
 	"github.com/eermolaev/test-vpn/core/daemon"
 	"github.com/eermolaev/test-vpn/core/ipc"
+	"github.com/eermolaev/test-vpn/core/profile"
 	"github.com/eermolaev/test-vpn/core/tui"
 )
 
@@ -182,9 +184,10 @@ func printStatus(c *ipc.Client) error {
 func importCmd(args []string) error {
 	fs := flag.NewFlagSet("import", flag.ExitOnError)
 	into := fs.String("into", "", "add transports to this profile ID")
+	user := fs.String("user", "", "OpenVPN user name (the password is asked for)")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
-		return errors.New("usage: testvpn import [--into ID] FILE|-")
+		return errors.New("usage: testvpn import [--into ID] [--user NAME] FILE|-")
 	}
 	var b []byte
 	var err error
@@ -196,9 +199,25 @@ func importCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	text := string(b)
+	if fs.Arg(0) != "-" {
+		// An .ovpn file may refer to keys next to it; the daemon cannot read them.
+		if text, err = profile.InlineOpenVPNFiles(text, filepath.Dir(fs.Arg(0))); err != nil {
+			return err
+		}
+	}
+	if *user != "" {
+		fmt.Fprint(os.Stderr, "password for "+*user+": ")
+		pw, err := term.ReadPassword(os.Stdin.Fd())
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return err
+		}
+		text = profile.WithOpenVPNCredentials(text, *user, string(pw))
+	}
 	return withClient(func(c *ipc.Client) error {
 		var p daemon.ProfileEntry
-		if err := c.Call(daemon.CmdImport, daemon.ImportArgs{Text: string(b), Into: *into}, &p); err != nil {
+		if err := c.Call(daemon.CmdImport, daemon.ImportArgs{Text: text, Into: *into}, &p); err != nil {
 			return err
 		}
 		fmt.Printf("imported %q (%d transports), id %s\n", p.Name, len(p.Summary.Transports), p.ID)

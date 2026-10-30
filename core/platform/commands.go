@@ -29,6 +29,9 @@ func PFRules(k KillSwitch) string {
 	if k.Tun != "" {
 		w("pass quick on %s all", k.Tun)
 	}
+	if k.EngineTun != "" {
+		w("pass quick on %s all", k.EngineTun)
+	}
 	w("pass out quick inet proto udp from any port 68 to any port 67")
 	w("pass in quick inet proto udp from any port 67 to any port 68")
 	w("pass out quick inet6 to fe80::/10")

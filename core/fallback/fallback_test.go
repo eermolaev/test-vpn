@@ -123,7 +123,12 @@ func TestManualAndPreferred(t *testing.T) {
 	if pl.Candidates()[0].Index != 2 {
 		t.Fatal("manual-only preferred must be ignored")
 	}
-	if _, err := NewPlanner(&profile.Profile{Transports: p.Transports[:1]}, DefaultPolicy(), Options{}); !errors.Is(err, ErrNoAutomaticTransport) {
+	// A profile with only manual-only transports uses them.
+	pl, err = NewPlanner(&profile.Profile{Transports: p.Transports[:1]}, DefaultPolicy(), Options{})
+	if err != nil || len(pl.Candidates()) != 1 || pl.Candidates()[0].Kind != profile.KindWireGuard {
+		t.Fatalf("manual-only profile: %v", err)
+	}
+	if _, err := NewPlanner(&profile.Profile{Transports: p.Transports[3:4]}, DefaultPolicy(), Options{}); !errors.Is(err, ErrNoAutomaticTransport) {
 		t.Fatal(err)
 	}
 }

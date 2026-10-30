@@ -45,6 +45,8 @@ type Options struct {
 	LogWriter io.Writer
 	// Tunnel overrides tunnel timing (tests).
 	TunePolicy func(*tunnel.Config)
+	// Starter replaces the real engines (tests).
+	Starter tunnel.Starter
 }
 
 // Daemon is the running service.
@@ -241,13 +243,7 @@ func (d *Daemon) pinServers(p *profile.Profile, s Settings) ([]netip.Addr, error
 		if err != nil {
 			return nil, err
 		}
-		switch {
-		case t.AWG != nil:
-			_, port, _ := net.SplitHostPort(t.AWG.Peer.Endpoint)
-			t.AWG.Peer.Endpoint = net.JoinHostPort(ip.String(), port)
-		case t.VLESS != nil:
-			t.VLESS.Address = ip.String()
-		}
+		t.SetServerIP(ip)
 		if !seen[ip] {
 			seen[ip] = true
 			servers = append(servers, ip)
@@ -354,9 +350,10 @@ func (d *Daemon) connectLocked(sp storedProfile, s Settings) error {
 		d.opts.TunePolicy(&cfg)
 	}
 	t, err := tunnel.Start(pio, cfg, tunnel.Deps{
-		Memory: d.mem,
-		Logf:   d.log,
-		Direct: allowDialer{plat: d.plat, d: d.directDialer()},
+		Starter: d.starter(),
+		Memory:  d.mem,
+		Logf:    d.log,
+		Direct:  allowDialer{plat: d.plat, d: d.directDialer()},
 	})
 	if err != nil {
 		pio.Close()
@@ -369,6 +366,31 @@ func (d *Daemon) connectLocked(sp storedProfile, s Settings) error {
 	d.logf("tunnel started on %s", name)
 	d.checkDirectLocked(s)
 	return nil
+}
+
+// starter starts real engines and opens the kill switch for the interface of
+// an engine with its own tunnel (openvpn). It must not take d.mu: it runs on
+// the tunnel goroutine, which Disconnect waits for while holding d.mu.
+func (d *Daemon) starter() tunnel.Starter {
+	base := tunnel.DefaultStarter(d.log)
+	if d.opts.Starter != nil {
+		base = d.opts.Starter
+	}
+	return func(ctx context.Context, tr profile.Transport) (engine.Engine, error) {
+		e, err := base(ctx, tr)
+		if err != nil {
+			return nil, err
+		}
+		name := ""
+		if i, ok := e.(engine.Interfacer); ok {
+			name = i.Interface()
+		}
+		if err := d.plat.AllowEngineInterface(name); err != nil {
+			e.Close()
+			return nil, fmt.Errorf("kill switch: %w", err)
+		}
+		return e, nil
+	}
 }
 
 // Disconnect stops the tunnel and removes all system changes.

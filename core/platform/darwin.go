@@ -56,6 +56,8 @@ type Darwin struct {
 	dns    []netip.Addr
 	direct map[netip.Addr]bool
 	ksOn   bool
+	ks     KillSwitch // last rules requested by the daemon
+	engTun string     // see AllowEngineInterface
 }
 
 // NewDarwin loads persisted state from statePath.
@@ -322,6 +324,26 @@ func (d *Darwin) restoreDNSLocked() error {
 func (d *Darwin) EnableKillSwitch(k KillSwitch) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.ks = k
+	return d.enableKillSwitchLocked()
+}
+
+func (d *Darwin) AllowEngineInterface(name string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.engTun == name {
+		return nil
+	}
+	d.engTun = name
+	if !d.ksOn {
+		return nil
+	}
+	return d.enableKillSwitchLocked()
+}
+
+func (d *Darwin) enableKillSwitchLocked() error {
+	k := d.ks
+	k.EngineTun = d.engTun
 	// The anchor is only evaluated if the main ruleset references com.apple/*,
 	// which the default /etc/pf.conf does.
 	if out, err := d.run("", "pfctl", "-sr"); err != nil || !strings.Contains(out, `anchor "com.apple/*"`) {
@@ -387,7 +409,7 @@ func (d *Darwin) DisableKillSwitch() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.direct = map[netip.Addr]bool{}
-	d.ksOn = false
+	d.ksOn, d.engTun = false, ""
 	return unblockLocked(d.run, &d.st, d.saveLocked)
 }
 

@@ -31,10 +31,13 @@ func (r DefaultRoute) Valid() bool { return r.Interface != "" && r.Index != 0 }
 
 // KillSwitch configures the packet filter (SEC-KILL-001).
 type KillSwitch struct {
-	Tun      string       // tunnel interface name, empty while it does not exist
-	Servers  []netip.Addr // VPN server addresses, reachable directly
-	AllowLAN bool
-	LAN      netip.Prefix // local subnet when AllowLAN
+	Tun string // tunnel interface name, empty while it does not exist
+	// EngineTun is the interface of an engine that runs its own tunnel
+	// (the openvpn binary); the daemon's sockets bound to it may pass.
+	EngineTun string
+	Servers   []netip.Addr // VPN server addresses, reachable directly
+	AllowLAN  bool
+	LAN       netip.Prefix // local subnet when AllowLAN
 }
 
 // Platform is the OS-specific part of the daemon.
@@ -60,6 +63,9 @@ type Platform interface {
 	// AllowDirect lets traffic to ips bypass the filter (excluded domains);
 	// it must return before the connection is opened.
 	AllowDirect(ips ...netip.Addr) error
+	// AllowEngineInterface lets traffic pass on the interface of an engine
+	// with its own tunnel ("" revokes it), keeping the rest of the rules.
+	AllowEngineInterface(name string) error
 	// DisableKillSwitch removes the filter rules.
 	DisableKillSwitch() error
 	// Conflicts describes other VPNs or firewalls that can capture or block

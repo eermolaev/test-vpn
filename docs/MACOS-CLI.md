@@ -35,6 +35,34 @@ and keeps running when the dashboard is closed. Profiles and settings are
 stored in `/Library/Application Support/TestVPN/config.json`, readable by
 root only. The socket accepts only root and the user who ran `install`.
 
+## Supported profiles
+
+| Format | Transport | Used automatically |
+|---|---|---|
+| `vless://…` links, xray JSON, Amnezia `vpn://` keys | VLESS + REALITY / TLS | REALITY yes, TLS only when pinned |
+| AmneziaWG `.conf` | AmneziaWG | yes |
+| WireGuard `.conf` (no obfuscation) | WireGuard | only if the profile has nothing stronger |
+| `.ovpn` | OpenVPN (UDP or TCP) | only if the profile has nothing stronger |
+| `socks5://user:pass@host:port`, `http://…`, `https://…` | SOCKS5, HTTP(S) proxy | only if the profile has nothing stronger |
+| `ss://…` (SIP002 or legacy) | Shadowsocks (AEAD and 2022 ciphers) | only if the profile has nothing stronger |
+
+WireGuard, OpenVPN and proxies are easy to recognise on the wire, so the client
+never falls back to them from VLESS or AmneziaWG; a profile made only of them
+is used as it is. Several links on separate lines become one profile.
+
+OpenVPN uses the `openvpn` binary (`brew install openvpn`). The client keeps
+control of routes, DNS and the kill switch: directives that run scripts or
+change routes, DNS or the interface (`up`, `route`, `redirect-gateway`,
+`dhcp-option`, …) are dropped. Files the config refers to (`ca`, `cert`, `key`,
+`tls-auth`, `auth-user-pass`, …) are embedded when you import the file from
+disk. If the server asks for a user name and password:
+
+    testvpn import --user alice client.ovpn
+
+The daemon runs `openvpn` as root. A Homebrew binary belongs to your user, so
+anything running as your user could replace it; install it only on a Mac you
+alone use.
+
 ## Dashboard
 
 | Key | Action |

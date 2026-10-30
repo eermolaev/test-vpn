@@ -23,6 +23,10 @@ import (
 	_ "github.com/xtls/xray-core/app/policy"
 	_ "github.com/xtls/xray-core/app/proxyman/inbound"
 	_ "github.com/xtls/xray-core/app/proxyman/outbound"
+	_ "github.com/xtls/xray-core/proxy/http"
+	_ "github.com/xtls/xray-core/proxy/shadowsocks"
+	_ "github.com/xtls/xray-core/proxy/shadowsocks_2022"
+	_ "github.com/xtls/xray-core/proxy/socks"
 	_ "github.com/xtls/xray-core/proxy/vless/outbound"
 	_ "github.com/xtls/xray-core/transport/internet/grpc"
 	_ "github.com/xtls/xray-core/transport/internet/reality"
@@ -32,13 +36,15 @@ import (
 	_ "github.com/xtls/xray-core/transport/internet/websocket"
 )
 
-// Engine is a running xray-core instance with a single VLESS outbound.
+// Engine is a running xray-core instance with a single outbound: VLESS or a
+// proxy (SOCKS5, HTTP, Shadowsocks).
 type Engine struct {
 	inst   *core.Instance
 	ctx    context.Context
 	cancel context.CancelFunc
 	name   string
-	cfg    *profile.VLESSConfig
+	cfg    *profile.VLESSConfig // set for VLESS
+	proxy  *profile.ProxyConfig // set for proxies
 	once   sync.Once
 }
 
@@ -86,23 +92,54 @@ func BuildConfig(c *profile.VLESSConfig) ([]byte, error) {
 	case "ws":
 		stream["wsSettings"] = map[string]any{"path": c.Path, "host": c.Host}
 	}
-	cfg := map[string]any{
+	return withOutbound(map[string]any{
+		"tag":      "proxy",
+		"protocol": "vless",
+		"settings": map[string]any{"vnext": []any{map[string]any{
+			"address": c.Address,
+			"port":    c.Port,
+			"users":   []any{user},
+		}}},
+		"streamSettings": stream,
+	})
+}
+
+// BuildProxyConfig renders the xray JSON config for a SOCKS5, HTTP(S) or
+// Shadowsocks server.
+func BuildProxyConfig(c *profile.ProxyConfig) ([]byte, error) {
+	out := map[string]any{"tag": "proxy"}
+	settings := map[string]any{"address": c.Address, "port": c.Port}
+	switch c.Protocol {
+	case profile.ProxySOCKS, profile.ProxyHTTP:
+		out["protocol"] = string(c.Protocol)
+		if c.Username != "" {
+			settings["user"], settings["pass"] = c.Username, c.Password
+		}
+		if c.TLS {
+			sni := c.SNI
+			if sni == "" {
+				sni = c.Address
+			}
+			out["streamSettings"] = map[string]any{"network": "raw", "security": "tls", "tlsSettings": map[string]any{"serverName": sni, "fingerprint": profile.DefaultFingerprint}}
+		}
+	case profile.ProxyShadowsocks:
+		out["protocol"] = "shadowsocks"
+		settings["method"], settings["password"] = c.Method, c.Password
+	default:
+		return nil, errclass.Wrap(errclass.Config, fmt.Errorf("xray: proxy protocol %q", c.Protocol))
+	}
+	out["settings"] = settings
+	return withOutbound(out)
+}
+
+func withOutbound(out map[string]any) ([]byte, error) {
+	return json.Marshal(map[string]any{
 		"log": map[string]any{"loglevel": "warning", "access": "none"},
 		"policy": map[string]any{
 			"levels": map[string]any{"0": map[string]any{"handshake": 8, "connIdle": 300, "uplinkOnly": 2, "downlinkOnly": 5, "bufferSize": 16}},
 		},
-		"outbounds": []any{map[string]any{
-			"tag":      "proxy",
-			"protocol": "vless",
-			"settings": map[string]any{"vnext": []any{map[string]any{
-				"address": c.Address,
-				"port":    c.Port,
-				"users":   []any{user},
-			}}},
-			"streamSettings": stream,
-		}},
-	}
-	return json.Marshal(cfg)
+		"outbounds": []any{out},
+	})
 }
 
 // Start starts xray-core for the transport. The VLESS connection itself is
@@ -112,6 +149,33 @@ func Start(c *profile.VLESSConfig, logf func(string)) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
+	name := profile.KindVLESSReality
+	if c.Security == "tls" {
+		name = profile.KindVLESSTLS
+	}
+	e, err := start(js, name, logf)
+	if err != nil {
+		return nil, err
+	}
+	e.cfg = c
+	return e, nil
+}
+
+// StartProxy starts xray-core with a SOCKS5, HTTP(S) or Shadowsocks outbound.
+func StartProxy(c *profile.ProxyConfig, kind profile.Kind, logf func(string)) (*Engine, error) {
+	js, err := BuildProxyConfig(c)
+	if err != nil {
+		return nil, err
+	}
+	e, err := start(js, kind, logf)
+	if err != nil {
+		return nil, err
+	}
+	e.proxy = c
+	return e, nil
+}
+
+func start(js []byte, kind profile.Kind, logf func(string)) (*Engine, error) {
 	var jc conf.Config
 	if err := json.Unmarshal(js, &jc); err != nil {
 		return nil, errclass.Wrap(errclass.Config, err)
@@ -132,11 +196,7 @@ func Start(c *profile.VLESSConfig, logf func(string)) (*Engine, error) {
 		return nil, errclass.Wrap(errclass.Config, fmt.Errorf("xray start: %w", err))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	name := string(profile.KindVLESSReality)
-	if c.Security == "tls" {
-		name = string(profile.KindVLESSTLS)
-	}
-	return &Engine{inst: inst, ctx: ctx, cancel: cancel, name: name, cfg: c}, nil
+	return &Engine{inst: inst, ctx: ctx, cancel: cancel, name: string(kind)}, nil
 }
 
 type logHandler func(string)
@@ -225,6 +285,10 @@ func (e *Engine) Close() error {
 }
 
 // Diagnose checks the server stage by stage (see the package function).
+// For proxies only the TCP connection is checked.
 func (e *Engine) Diagnose(ctx context.Context, dns netip.AddrPort) error {
+	if e.proxy != nil {
+		return diagnoseProxy(ctx, e.proxy)
+	}
 	return Diagnose(ctx, e.cfg, dns)
 }

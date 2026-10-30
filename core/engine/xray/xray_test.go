@@ -12,6 +12,26 @@ import (
 
 func roundTrip(t *testing.T, e *Engine, echo testenv.Echo) {
 	t.Helper()
+	tcpRoundTrip(t, e, echo)
+	udpRoundTrip(t, e, echo)
+}
+
+// tcpWorks reports whether one TCP exchange through e succeeds.
+func tcpWorks(e *Engine, echo testenv.Echo) bool {
+	c, err := e.DialTCP(context.Background(), echo.TCP)
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(3 * time.Second))
+	c.Write([]byte("ping"))
+	buf := make([]byte, 64)
+	n, err := io.ReadAtLeast(c, buf, len("echo:ping"))
+	return err == nil && string(buf[:n]) == "echo:ping"
+}
+
+func tcpRoundTrip(t *testing.T, e *Engine, echo testenv.Echo) {
+	t.Helper()
 	ctx := context.Background()
 	c, err := e.DialTCP(ctx, echo.TCP)
 	if err != nil {
@@ -29,16 +49,20 @@ func roundTrip(t *testing.T, e *Engine, echo testenv.Echo) {
 		t.Fatalf("tcp: %q %v", buf[:n], err)
 	}
 	c.Close()
+}
 
-	u, err := e.DialUDP(ctx, echo.UDP)
+func udpRoundTrip(t *testing.T, e *Engine, echo testenv.Echo) {
+	t.Helper()
+	u, err := e.DialUDP(context.Background(), echo.UDP)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer u.Close()
 	u.SetDeadline(time.Now().Add(10 * time.Second))
+	buf := make([]byte, 64)
 	for i := 0; i < 3; i++ {
 		u.Write([]byte("dgram"))
-		n, err = u.Read(buf)
+		n, err := u.Read(buf)
 		if err != nil || string(buf[:n]) != "echo:dgram" {
 			t.Fatalf("udp %d: %q %v", i, buf[:n], err)
 		}

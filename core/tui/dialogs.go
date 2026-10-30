@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/eermolaev/test-vpn/core/daemon"
+	"github.com/eermolaev/test-vpn/core/profile"
 	"github.com/eermolaev/test-vpn/core/rules"
 )
 
@@ -572,7 +573,8 @@ func readImport(v string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return string(b), nil
+		// An .ovpn file may refer to keys next to it.
+		return profile.InlineOpenVPNFiles(string(b), filepath.Dir(path))
 	}
 	if v == "" {
 		return "", fmt.Errorf("nothing to import")

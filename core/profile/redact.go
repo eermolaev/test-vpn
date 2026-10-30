@@ -27,6 +27,12 @@ func (p *Profile) Secrets() []string {
 		if c := t.VLESS; c != nil {
 			add(c.UUID, c.PublicKey, c.ShortID, c.Address, c.Path)
 		}
+		if c := t.OpenVPN; c != nil {
+			add(c.Host)
+		}
+		if c := t.Proxy; c != nil {
+			add(c.Address, c.Username, c.Password)
+		}
 	}
 	return out
 }
@@ -78,6 +84,17 @@ func (p *Profile) Summarize() Summary {
 		}
 		if t.AWG != nil {
 			ts.Detail = "udp"
+		}
+		if c := t.OpenVPN; c != nil {
+			ts.Detail = c.Proto
+		}
+		if c := t.Proxy; c != nil {
+			switch {
+			case c.Method != "":
+				ts.Detail = c.Method
+			case c.TLS:
+				ts.Detail = "tls"
+			}
 		}
 		s.Transports = append(s.Transports, ts)
 	}

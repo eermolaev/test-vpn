@@ -32,3 +32,9 @@ type Engine interface {
 type Diagnoser interface {
 	Diagnose(ctx context.Context, dns netip.AddrPort) error
 }
+
+// Interfacer is implemented by engines that run their own tunnel interface
+// (openvpn); the kill switch must let that interface pass.
+type Interfacer interface {
+	Interface() string
+}

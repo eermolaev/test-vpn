@@ -21,6 +21,10 @@ const (
 	KindVLESSReality Kind = "vless-reality"
 	KindVLESSTLS     Kind = "vless-tls"
 	KindVLESSPlain   Kind = "vless-plain"
+	KindOpenVPN      Kind = "openvpn"
+	KindSOCKS        Kind = "socks"
+	KindHTTPProxy    Kind = "http-proxy"
+	KindShadowsocks  Kind = "shadowsocks"
 )
 
 // Policy says how a transport may be used (spec 4.1).
@@ -47,11 +51,13 @@ type Profile struct {
 
 // Transport is one way to connect to the server.
 type Transport struct {
-	Kind   Kind         `json:"kind"`
-	Policy Policy       `json:"policy"`
-	Label  string       `json:"label,omitempty"`
-	AWG    *AWGConfig   `json:"awg,omitempty"`
-	VLESS  *VLESSConfig `json:"vless,omitempty"`
+	Kind    Kind           `json:"kind"`
+	Policy  Policy         `json:"policy"`
+	Label   string         `json:"label,omitempty"`
+	AWG     *AWGConfig     `json:"awg,omitempty"`
+	VLESS   *VLESSConfig   `json:"vless,omitempty"`
+	OpenVPN *OpenVPNConfig `json:"openvpn,omitempty"`
+	Proxy   *ProxyConfig   `json:"proxy,omitempty"`
 }
 
 // ID returns a stable identifier used to remember the working transport for a
@@ -62,6 +68,10 @@ func (t Transport) ID() string {
 		return string(t.Kind) + ":" + t.AWG.Peer.Endpoint
 	case t.VLESS != nil:
 		return string(t.Kind) + ":" + net.JoinHostPort(t.VLESS.Address, strconv.Itoa(t.VLESS.Port)) + ":" + t.VLESS.Network
+	case t.OpenVPN != nil:
+		return string(t.Kind) + ":" + net.JoinHostPort(t.OpenVPN.Host, strconv.Itoa(t.OpenVPN.Port)) + ":" + t.OpenVPN.Proto
+	case t.Proxy != nil:
+		return string(t.Kind) + ":" + net.JoinHostPort(t.Proxy.Address, strconv.Itoa(t.Proxy.Port))
 	}
 	return string(t.Kind)
 }
@@ -74,8 +84,34 @@ func (t Transport) ServerHost() string {
 		return h
 	case t.VLESS != nil:
 		return t.VLESS.Address
+	case t.OpenVPN != nil:
+		return t.OpenVPN.Host
+	case t.Proxy != nil:
+		return t.Proxy.Address
 	}
 	return ""
+}
+
+// SetServerIP replaces the server host name with its resolved address, so
+// that the engine connects exactly where the server route points.
+func (t *Transport) SetServerIP(ip netip.Addr) {
+	switch {
+	case t.AWG != nil:
+		_, port, _ := net.SplitHostPort(t.AWG.Peer.Endpoint)
+		t.AWG.Peer.Endpoint = net.JoinHostPort(ip.String(), port)
+	case t.VLESS != nil:
+		t.VLESS.Address = ip.String()
+	case t.OpenVPN != nil:
+		t.OpenVPN.Host = ip.String()
+	case t.Proxy != nil:
+		t.Proxy.Address = ip.String()
+	}
+}
+
+// UDPBased reports whether the transport reaches the server over UDP, so a
+// silent server is a UDP rather than a TCP timeout.
+func (t Transport) UDPBased() bool {
+	return t.AWG != nil || t.OpenVPN != nil && t.OpenVPN.Proto == "udp"
 }
 
 // AWGConfig is an AmneziaWG interface with a single peer.
@@ -211,25 +247,53 @@ func (t *Transport) classify() {
 		default:
 			t.Kind, t.Policy = KindVLESSPlain, PolicyForbidden
 		}
+	case t.OpenVPN != nil:
+		// OpenVPN and proxies are easy to recognise on the wire: they are
+		// used when chosen, never as an automatic fallback (SEC-NET-003).
+		t.Kind, t.Policy = KindOpenVPN, PolicyManualOnly
+	case t.Proxy != nil:
+		t.Policy = PolicyManualOnly
+		switch t.Proxy.Protocol {
+		case ProxySOCKS:
+			t.Kind = KindSOCKS
+		case ProxyHTTP:
+			t.Kind = KindHTTPProxy
+		case ProxyShadowsocks:
+			t.Kind = KindShadowsocks
+		}
 	}
 }
 
 // Validate checks the transport and fills defaults.
 func (t *Transport) Validate() error {
+	var err error
 	switch {
-	case t.AWG != nil && t.VLESS == nil:
-		if err := t.AWG.validate(); err != nil {
-			return err
-		}
-	case t.VLESS != nil && t.AWG == nil:
-		if err := t.VLESS.validate(); err != nil {
-			return err
-		}
-	default:
-		return invalid("transport must have exactly one of awg or vless")
+	case t.engines() != 1:
+		return invalid("transport must have exactly one of awg, vless, openvpn or proxy")
+	case t.AWG != nil:
+		err = t.AWG.validate()
+	case t.VLESS != nil:
+		err = t.VLESS.validate()
+	case t.OpenVPN != nil:
+		err = t.OpenVPN.validate()
+	case t.Proxy != nil:
+		err = t.Proxy.validate()
+	}
+	if err != nil {
+		return err
 	}
 	t.classify()
 	return nil
+}
+
+func (t *Transport) engines() int {
+	n := 0
+	for _, set := range []bool{t.AWG != nil, t.VLESS != nil, t.OpenVPN != nil, t.Proxy != nil} {
+		if set {
+			n++
+		}
+	}
+	return n
 }
 
 func (p *Profile) Validate() error {

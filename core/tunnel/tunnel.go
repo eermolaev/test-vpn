@@ -361,8 +361,16 @@ func (t *Tunnel) connect() (engine.Engine, error) {
 	}
 }
 
+// openVPNTimeout is the minimum attempt time for OpenVPN: its TLS handshake
+// and the pushed configuration take several round trips.
+const openVPNTimeout = 30 * time.Second
+
 func (t *Tunnel) attempt(tr profile.Transport) (engine.Engine, error) {
-	ctx, cancel := context.WithTimeout(t.ctx, t.cfg.Policy.FailTimeout)
+	timeout := t.cfg.Policy.FailTimeout
+	if tr.OpenVPN != nil {
+		timeout = max(timeout, openVPNTimeout)
+	}
+	ctx, cancel := context.WithTimeout(t.ctx, timeout)
 	defer cancel()
 	e, err := t.deps.Starter(ctx, tr)
 	if err != nil {
@@ -403,7 +411,7 @@ func (t *Tunnel) diagnose(e engine.Engine, healthErr error) error {
 }
 
 func timeoutClass(tr profile.Transport) errclass.Class {
-	if tr.AWG != nil {
+	if tr.UDPBased() {
 		return errclass.UDPTimeout
 	}
 	return errclass.TCPTimeout

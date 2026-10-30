@@ -12,15 +12,16 @@ import (
 // Fake is an in-memory Platform for tests. The "apps" side of the tunnel is
 // available through AppEnd after CreateTUN.
 type Fake struct {
-	mu       sync.Mutex
-	events   []string
-	appEnd   *netstack.PipeIO
-	Route    DefaultRoute
-	ks       *KillSwitch
-	allowed  map[netip.Addr]bool
-	dns      []netip.Addr
-	servers  []netip.Addr
-	OnCreate func(app *netstack.PipeIO) // called when the tunnel is created
+	mu        sync.Mutex
+	events    []string
+	appEnd    *netstack.PipeIO
+	Route     DefaultRoute
+	ks        *KillSwitch
+	allowed   map[netip.Addr]bool
+	dns       []netip.Addr
+	servers   []netip.Addr
+	engineTun string
+	OnCreate  func(app *netstack.PipeIO) // called when the tunnel is created
 	// ConflictList is returned by Conflicts.
 	ConflictList []string
 }
@@ -129,6 +130,21 @@ func (f *Fake) AllowDirect(ips ...netip.Addr) error {
 		f.allowed[ip] = true
 	}
 	return nil
+}
+
+func (f *Fake) AllowEngineInterface(name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.engineTun = name
+	f.log("engine-interface %s", name)
+	return nil
+}
+
+// EngineInterface returns the interface allowed by AllowEngineInterface.
+func (f *Fake) EngineInterface() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.engineTun
 }
 
 func (f *Fake) DisableKillSwitch() error {

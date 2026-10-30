@@ -10,6 +10,7 @@ import (
 
 	"github.com/eermolaev/test-vpn/core/engine"
 	"github.com/eermolaev/test-vpn/core/engine/awg"
+	"github.com/eermolaev/test-vpn/core/engine/openvpn"
 	"github.com/eermolaev/test-vpn/core/engine/xray"
 	"github.com/eermolaev/test-vpn/core/errclass"
 	"github.com/eermolaev/test-vpn/core/profile"
@@ -34,6 +35,13 @@ func DefaultStarter(logf func(string)) Starter {
 				return nil, err
 			}
 			return xray.Start(t.VLESS, logf)
+		case t.Proxy != nil:
+			if err := tcpReachable(ctx, t.Proxy.Address, t.Proxy.Port); err != nil {
+				return nil, err
+			}
+			return xray.StartProxy(t.Proxy, t.Kind, logf)
+		case t.OpenVPN != nil:
+			return openvpn.Start(ctx, t.OpenVPN, openvpn.Options{Logf: logf})
 		}
 		return nil, errclass.Wrap(errclass.Config, errors.New("empty transport"))
 	}

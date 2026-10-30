@@ -70,7 +70,8 @@ type Planner struct {
 
 // NewPlanner builds a plan for profile p. Automatic plans include only
 // transports with a primary or fallback policy, so a failure never leads to
-// plain WireGuard or unprotected VLESS (SEC-NET-003).
+// plain WireGuard or unprotected VLESS (SEC-NET-003); manual-only transports
+// are used only when the profile has nothing else.
 func NewPlanner(p *profile.Profile, pol Policy, opts Options) (*Planner, error) {
 	if pol.Attempts <= 0 || pol.MaxRounds <= 0 {
 		return nil, errors.New("fallback: invalid policy")
@@ -108,6 +109,16 @@ func NewPlanner(p *profile.Profile, pol Policy, opts Options) (*Planner, error) 
 		pl.cands = append(pl.cands, *pref)
 	}
 	pl.cands = append(append(pl.cands, primary...), fb...)
+	if len(pl.cands) == 0 {
+		// A profile made only of manual-only transports (WireGuard,
+		// OpenVPN, proxies) was chosen as it is: there is nothing stronger
+		// to fall back from, so its transports are tried in order.
+		for i, t := range p.Transports {
+			if t.Policy == profile.PolicyManualOnly {
+				pl.cands = append(pl.cands, Candidate{Index: i, ID: t.ID(), Kind: t.Kind})
+			}
+		}
+	}
 	if len(pl.cands) == 0 {
 		return nil, ErrNoAutomaticTransport
 	}

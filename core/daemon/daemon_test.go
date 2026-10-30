@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -40,12 +41,16 @@ func startDaemonWith(t *testing.T, dir string, directDialer engine.Dialer) *env 
 }
 
 func startDaemonBoot(t *testing.T, dir string, directDialer engine.Dialer, boot func() int64) *env {
+	return startDaemonOpts(t, dir, directDialer, boot, nil)
+}
+
+func startDaemonOpts(t *testing.T, dir string, directDialer engine.Dialer, boot func() int64, starter tunnel.Starter) *env {
 	t.Helper()
 	plat := platform.NewFake()
 	e := &env{plat: plat, client: make(chan *clientstack.Client, 4), dir: dir}
 	plat.OnCreate = func(app *netstack.PipeIO) { e.client <- clientstack.New(app) }
 	d, err := New(Options{
-		Dir: dir, Platform: plat, NoBind: true, MonitorInterval: 50 * time.Millisecond, DirectDialer: directDialer, BootTime: boot,
+		Dir: dir, Platform: plat, NoBind: true, MonitorInterval: 50 * time.Millisecond, DirectDialer: directDialer, BootTime: boot, Starter: starter,
 		TunePolicy: func(c *tunnel.Config) {
 			c.Policy = fallback.Policy{Attempts: 1, FailTimeout: 3 * time.Second, BackoffBase: 10 * time.Millisecond, BackoffMax: 50 * time.Millisecond, MaxRounds: 1}
 		},
@@ -407,5 +412,47 @@ func TestFailoverToNextProfile(t *testing.T) {
 func TestFailoverSettings(t *testing.T) {
 	if (Settings{}).Failover() != DefaultFailoverAttempts || (Settings{FailoverAttempts: -1}).Failover() != 0 || (Settings{FailoverAttempts: 3}).Failover() != 3 {
 		t.Fatal("Failover()")
+	}
+}
+
+// ifcEngine reports an interface of its own, like the openvpn engine.
+type ifcEngine struct{ engine.Engine }
+
+func (ifcEngine) Interface() string { return "utun77" }
+
+func TestDaemonProxy(t *testing.T) {
+	host := testenv.HostIP(t)
+	echo := testenv.StartEchoOn(t, host, "echo:")
+	dns := testenv.StartDNSOn(t, host, [4]byte{1, 2, 3, 4})
+	px := testenv.StartProxies(t)
+	base := tunnel.DefaultStarter(nil)
+	e := startDaemonOpts(t, t.TempDir(), nil, nil, func(ctx context.Context, tr profile.Transport) (engine.Engine, error) {
+		en, err := base(ctx, tr)
+		if err != nil {
+			return nil, err
+		}
+		return ifcEngine{en}, nil
+	})
+	link := fmt.Sprintf("socks5://%s:%s@%s:%d#Proxy", px.SOCKS.Username, px.SOCKS.Password, px.SOCKS.Address, px.SOCKS.Port)
+	var pe ProfileEntry
+	if err := e.cl.Call(CmdImport, ImportArgs{Text: link}, &pe); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdSetSettings, Settings{DNSServers: []string{dns.String()}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdConnect, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := e.waitConnected(t)
+	if st.Tunnel.TransportKind != string(profile.KindSOCKS) {
+		t.Fatalf("transport %q", st.Tunnel.TransportKind)
+	}
+	if e.plat.EngineInterface() != "utun77" {
+		t.Fatalf("engine interface %q must pass the kill switch", e.plat.EngineInterface())
+	}
+	c := <-e.client
+	if got := exchange(t, c, echo.TCP, []byte("hi")); got != "echo:hi" {
+		t.Fatalf("proxy flow: %q", got)
 	}
 }

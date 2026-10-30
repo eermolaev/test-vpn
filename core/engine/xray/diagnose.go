@@ -74,6 +74,24 @@ func Diagnose(ctx context.Context, c *profile.VLESSConfig, dns netip.AddrPort) e
 	return errclass.Wrap(errclass.Routing, fmt.Errorf("%s; VLESS request: %w", ok, err))
 }
 
+// diagnoseProxy checks that the proxy accepts TCP connections. The proxy
+// protocol itself is not repeated: its errors reach the log through xray.
+func diagnoseProxy(ctx context.Context, c *profile.ProxyConfig) error {
+	addr := net.JoinHostPort(c.Address, strconv.Itoa(c.Port))
+	start := time.Now()
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp4", addr)
+	if err != nil {
+		cl := errclass.Classify(err)
+		if cl != errclass.TCPReset && cl != errclass.NoNetwork && cl != errclass.DNS {
+			cl = errclass.TCPTimeout
+		}
+		return errclass.Wrap(cl, fmt.Errorf("proxy %s is not reachable over TCP: %w", addr, err))
+	}
+	conn.Close()
+	return errclass.Wrap(errclass.ServerSilent, fmt.Errorf("proxy accepts TCP in %s, but nothing passes through it: check the user name, password or cipher", ms(time.Since(start))))
+}
+
 func handshake(ctx context.Context, raw net.Conn, c *profile.VLESSConfig) (net.Conn, error) {
 	fp := c.Fingerprint
 	if fp == "" {
