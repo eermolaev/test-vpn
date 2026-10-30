@@ -63,6 +63,15 @@ The daemon runs `openvpn` as root. A Homebrew binary belongs to your user, so
 anything running as your user could replace it; install it only on a Mac you
 alone use.
 
+## When a network blocks VLESS
+
+If a VLESS attempt fails in a way that looks like DPI (the handshake gets no
+answer or is cut off, or nothing comes back through the server), the next
+attempt splits the TLS ClientHello into several pieces, trying presets in
+turn: `tlshello 100-200`, `tlshello 10-30`, `tcp 1-5`. The split that worked is
+remembered for that network. Each failure is explained stage by stage in the
+log (TCP, handshake, a DNS query through the server).
+
 ## Dashboard
 
 | Key | Action |

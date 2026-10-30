@@ -43,6 +43,9 @@ func Diagnose(ctx context.Context, c *profile.VLESSConfig, dns netip.AddrPort) e
 	}
 	defer raw.Close()
 	tcpTime := time.Since(start)
+	if c.Fragment > 0 && c.Fragment < len(Fragments) {
+		raw = &fragmentConn{Conn: raw, f: Fragments[c.Fragment]}
+	}
 	if dl, ok := ctx.Deadline(); ok {
 		raw.SetDeadline(dl)
 	}
@@ -56,7 +59,7 @@ func Diagnose(ctx context.Context, c *profile.VLESSConfig, dns netip.AddrPort) e
 		return handshakeError(c, tcpTime, time.Since(start), err)
 	}
 	hsTime := time.Since(start)
-	ok := fmt.Sprintf("TCP %s, %s handshake %s", ms(tcpTime), strings.ToUpper(c.Security), ms(hsTime))
+	ok := fmt.Sprintf("TCP %s, %s handshake %s", ms(tcpTime), handshakeName(c), ms(hsTime))
 	if c.Network != "raw" && c.Network != "tcp" && c.Network != "" {
 		return errclass.Wrap(errclass.Routing, fmt.Errorf("%s; the %s transport over it was not checked", ok, c.Network))
 	}
@@ -124,7 +127,7 @@ func handshake(ctx context.Context, raw net.Conn, c *profile.VLESSConfig) (net.C
 }
 
 func handshakeError(c *profile.VLESSConfig, tcpTime, hsTime time.Duration, err error) error {
-	pre := fmt.Sprintf("TCP %s, then the %s handshake", ms(tcpTime), strings.ToUpper(c.Security))
+	pre := fmt.Sprintf("TCP %s, then the %s handshake", ms(tcpTime), handshakeName(c))
 	switch {
 	case errclass.Classify(err) == errclass.Config:
 		return err
@@ -203,6 +206,15 @@ func isTimeout(err error) bool {
 
 func isClosed(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errclass.Classify(err) == errclass.TCPReset
+}
+
+// handshakeName names the handshake and the ClientHello fragmentation used.
+func handshakeName(c *profile.VLESSConfig) string {
+	n := strings.ToUpper(c.Security)
+	if c.Fragment > 0 && c.Fragment < len(Fragments) {
+		n += " (ClientHello split: " + Fragments[c.Fragment].Name + ")"
+	}
+	return n
 }
 
 func ms(d time.Duration) string { return d.Round(time.Millisecond).String() }

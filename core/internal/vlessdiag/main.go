@@ -19,6 +19,7 @@ func main() {
 	sni := flag.String("sni", "", "override the server name")
 	port := flag.Int("port", 0, "override the port")
 	n := flag.Int("n", 1, "attempts")
+	frag := flag.Int("frag", 0, "ClientHello split preset (index into xray.Fragments)")
 	flag.Parse()
 	b, err := os.ReadFile(flag.Arg(0))
 	if err != nil {
@@ -34,11 +35,12 @@ func main() {
 	if *port != 0 {
 		c.Port = *port
 	}
+	c.Fragment = *frag
 	for i := 0; i < *n; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		start := time.Now()
 		err := xray.Diagnose(ctx, &c, netip.MustParseAddrPort("8.8.8.8:53"))
 		cancel()
-		fmt.Printf("%s sni=%s port=%d: %v (%s)\n", time.Now().Format("15:04:05"), c.SNI, c.Port, err, time.Since(start).Round(time.Millisecond))
+		fmt.Printf("%s sni=%s port=%d split=%s: %v (%s)\n", time.Now().Format("15:04:05"), c.SNI, c.Port, xray.Fragments[c.Fragment].Name, err, time.Since(start).Round(time.Millisecond))
 	}
 }

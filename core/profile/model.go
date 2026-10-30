@@ -205,6 +205,9 @@ type VLESSConfig struct {
 	Host        string `json:"host,omitempty"`
 	Mode        string `json:"mode,omitempty"` // xhttp mode
 	ServiceName string `json:"serviceName,omitempty"`
+	// Fragment is chosen by the tunnel at run time: an index into
+	// xray.Fragments (0: the ClientHello is sent whole). Never stored.
+	Fragment int `json:"-"`
 }
 
 // DefaultFingerprint is the uTLS fingerprint used when the profile has none.

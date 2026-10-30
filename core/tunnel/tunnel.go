@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/eermolaev/test-vpn/core/direct"
 	"github.com/eermolaev/test-vpn/core/dnsintercept"
 	"github.com/eermolaev/test-vpn/core/engine"
+	"github.com/eermolaev/test-vpn/core/engine/xray"
 	"github.com/eermolaev/test-vpn/core/errclass"
 	"github.com/eermolaev/test-vpn/core/fallback"
 	"github.com/eermolaev/test-vpn/core/flowrouter"
@@ -319,6 +321,7 @@ func (t *Tunnel) connect() (engine.Engine, error) {
 		return nil, errclass.Wrap(errclass.Config, err)
 	}
 	var lastErr error
+	frag := map[string]int{} // transport ID → index into xray.Fragments
 	for {
 		step, ok := pl.Next(lastErr)
 		if !ok {
@@ -337,12 +340,30 @@ func (t *Tunnel) connect() (engine.Engine, error) {
 			}
 			s.TransportID, s.TransportKind, s.Attempt, s.Round = tr.ID(), string(tr.Kind), step.Attempt, step.Round
 		})
-		t.logf("connecting via %s (attempt %d, round %d)", tr.ID(), step.Attempt, step.Round)
+		k := 0
+		if tr.VLESS != nil {
+			if _, seen := frag[tr.ID()]; !seen {
+				frag[tr.ID()] = t.rememberedFragment(tr.ID())
+			}
+			k = frag[tr.ID()]
+			v := *tr.VLESS
+			v.Fragment = k
+			tr.VLESS = &v
+		}
+		how := ""
+		if k > 0 {
+			how = ", ClientHello split " + xray.Fragments[k].Name
+		}
+		t.logf("connecting via %s (attempt %d, round %d%s)", tr.ID(), step.Attempt, step.Round, how)
 		e, err := t.attempt(tr)
 		if err != nil {
 			lastErr = err
 			c := errclass.Classify(err)
 			t.logf("%s failed: %v", tr.ID(), err)
+			if tr.VLESS != nil && looksLikeDPI(err) {
+				// The next attempt splits the ClientHello differently.
+				frag[tr.ID()] = (k + 1) % len(xray.Fragments)
+			}
 			t.setStatus(func(s *Status) { s.ErrorClass, s.ErrorMessage = c, c.Message(); s.Failures++ })
 			continue
 		}
@@ -351,6 +372,9 @@ func (t *Tunnel) connect() (engine.Engine, error) {
 		key := t.netKey
 		t.mu.Unlock()
 		t.deps.Memory.Remember(key, tr.ID())
+		if tr.VLESS != nil {
+			t.deps.Memory.Remember(fragmentKey(key, tr.ID()), strconv.Itoa(k))
+		}
 		t.router.SetEngine(e)
 		t.setStatus(func(s *Status) {
 			s.State, s.Since, s.ErrorClass, s.ErrorMessage = StateConnected, time.Now(), errclass.None, ""
@@ -364,6 +388,47 @@ func (t *Tunnel) connect() (engine.Engine, error) {
 // openVPNTimeout is the minimum attempt time for OpenVPN: its TLS handshake
 // and the pushed configuration take several round trips.
 const openVPNTimeout = 30 * time.Second
+
+// healthFailure marks an error found after the engine started: the server
+// was reachable, but traffic did not pass.
+type healthFailure struct{ error }
+
+func (h healthFailure) Unwrap() error { return h.error }
+
+// looksLikeDPI reports whether a failure is one that splitting the
+// ClientHello may get past: the handshake gets no answer or is cut off, or
+// nothing comes back after it.
+func looksLikeDPI(err error) bool {
+	var h healthFailure
+	if !errors.As(err, &h) {
+		return false
+	}
+	switch errclass.Classify(err) {
+	case errclass.TLSTimeout, errclass.TCPReset, errclass.ServerSilent, errclass.Routing:
+		return true
+	}
+	return false
+}
+
+func fragmentKey(netKey, transportID string) string {
+	if netKey == "" {
+		return ""
+	}
+	return netKey + "|fragment|" + transportID
+}
+
+// rememberedFragment returns the fragmentation that last worked for the
+// transport on the current network.
+func (t *Tunnel) rememberedFragment(transportID string) int {
+	t.mu.Lock()
+	key := fragmentKey(t.netKey, transportID)
+	t.mu.Unlock()
+	k, err := strconv.Atoi(t.deps.Memory.Preferred(key))
+	if err != nil || k < 0 || k >= len(xray.Fragments) {
+		return 0
+	}
+	return k
+}
 
 func (t *Tunnel) attempt(tr profile.Transport) (engine.Engine, error) {
 	timeout := t.cfg.Policy.FailTimeout
@@ -381,7 +446,7 @@ func (t *Tunnel) attempt(tr profile.Transport) (engine.Engine, error) {
 	}
 	if err := t.healthCheck(ctx, e); err != nil {
 		e.Close()
-		return nil, errclass.Wrap(timeoutClass(tr), t.diagnose(e, err))
+		return nil, errclass.Wrap(timeoutClass(tr), healthFailure{t.diagnose(e, err)})
 	}
 	return e, nil
 }

@@ -23,6 +23,7 @@ import (
 	_ "github.com/xtls/xray-core/app/policy"
 	_ "github.com/xtls/xray-core/app/proxyman/inbound"
 	_ "github.com/xtls/xray-core/app/proxyman/outbound"
+	_ "github.com/xtls/xray-core/proxy/freedom"
 	_ "github.com/xtls/xray-core/proxy/http"
 	_ "github.com/xtls/xray-core/proxy/shadowsocks"
 	_ "github.com/xtls/xray-core/proxy/shadowsocks_2022"
@@ -92,6 +93,11 @@ func BuildConfig(c *profile.VLESSConfig) ([]byte, error) {
 	case "ws":
 		stream["wsSettings"] = map[string]any{"path": c.Path, "host": c.Host}
 	}
+	var extra []any
+	if c.Fragment > 0 && c.Fragment < len(Fragments) {
+		stream["sockopt"] = map[string]any{"dialerProxy": "fragment"}
+		extra = append(extra, Fragments[c.Fragment].outbound("fragment"))
+	}
 	return withOutbound(map[string]any{
 		"tag":      "proxy",
 		"protocol": "vless",
@@ -101,7 +107,7 @@ func BuildConfig(c *profile.VLESSConfig) ([]byte, error) {
 			"users":   []any{user},
 		}}},
 		"streamSettings": stream,
-	})
+	}, extra...)
 }
 
 // BuildProxyConfig renders the xray JSON config for a SOCKS5, HTTP(S) or
@@ -132,13 +138,13 @@ func BuildProxyConfig(c *profile.ProxyConfig) ([]byte, error) {
 	return withOutbound(out)
 }
 
-func withOutbound(out map[string]any) ([]byte, error) {
+func withOutbound(out map[string]any, extra ...any) ([]byte, error) {
 	return json.Marshal(map[string]any{
 		"log": map[string]any{"loglevel": "warning", "access": "none"},
 		"policy": map[string]any{
 			"levels": map[string]any{"0": map[string]any{"handshake": 8, "connIdle": 300, "uplinkOnly": 2, "downlinkOnly": 5, "bufferSize": 16}},
 		},
-		"outbounds": []any{out},
+		"outbounds": append([]any{out}, extra...),
 	})
 }
 

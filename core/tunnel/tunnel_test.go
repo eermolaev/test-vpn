@@ -3,6 +3,7 @@ package tunnel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -495,5 +496,82 @@ func TestFailedHealthCheckIsDiagnosed(t *testing.T) {
 		if !strings.Contains(joined, c.logText) {
 			t.Fatalf("log lacks %q:\n%s", c.logText, joined)
 		}
+	}
+}
+
+func TestFragmentationFoundAndRemembered(t *testing.T) {
+	dns := startTCPDNS(t)
+	vless := &profile.VLESSConfig{Address: "203.0.113.10", Port: 443, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Security: "reality", Network: "raw", Flow: "xtls-rprx-vision", SNI: "a.example", PublicKey: "k", ShortID: "ab"}
+	mem := fallback.NewMemory(nil)
+	var tried []int
+	var mu sync.Mutex
+	run := func() Status {
+		tunEnd, _ := netstack.NewPipe(16)
+		pol := fastPolicy()
+		pol.Attempts = 4
+		tun, err := Start(tunEnd, Config{
+			Profile:   &profile.Profile{Transports: []profile.Transport{{VLESS: vless}}},
+			Settings:  Settings{DNSServers: []string{dns.String()}},
+			Policy:    pol,
+			NetworkID: "wifi|192.0.2.1",
+		}, Deps{
+			Memory: mem,
+			Starter: func(_ context.Context, tr profile.Transport) (engine.Engine, error) {
+				mu.Lock()
+				tried = append(tried, tr.VLESS.Fragment)
+				mu.Unlock()
+				if tr.VLESS.Fragment == 2 { // DPI lets only this split through
+					return tcpOnlyEngine{dnsTCP: dns}, nil
+				}
+				return diagEngine{diag: errclass.Wrap(errclass.TLSTimeout, errors.New("handshake got no answer"))}, nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tun.Stop()
+		return waitState(t, tun, StateConnected, 20*time.Second)
+	}
+	run()
+	mu.Lock()
+	if fmt.Sprint(tried) != "[0 1 2]" {
+		t.Fatalf("presets tried: %v", tried)
+	}
+	tried = nil
+	mu.Unlock()
+	run() // the same network starts with the split that worked
+	mu.Lock()
+	defer mu.Unlock()
+	if fmt.Sprint(tried) != "[2]" {
+		t.Fatalf("remembered preset not used: %v", tried)
+	}
+}
+
+func TestNoFragmentationForNonDPIFailures(t *testing.T) {
+	vless := &profile.VLESSConfig{Address: "203.0.113.10", Port: 443, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Security: "reality", Network: "raw", SNI: "a.example", PublicKey: "k", ShortID: "ab"}
+	var tried []int
+	var mu sync.Mutex
+	tunEnd, _ := netstack.NewPipe(16)
+	pol := fastPolicy()
+	pol.Attempts = 3
+	tun, err := Start(tunEnd, Config{
+		Profile:  &profile.Profile{Transports: []profile.Transport{{VLESS: vless}}},
+		Settings: Settings{DNSServers: []string{"127.0.0.1"}},
+		Policy:   pol,
+	}, Deps{Starter: func(_ context.Context, tr profile.Transport) (engine.Engine, error) {
+		mu.Lock()
+		tried = append(tried, tr.VLESS.Fragment)
+		mu.Unlock()
+		return diagEngine{diag: errclass.Wrap(errclass.ServerClosed, errors.New("unknown user"))}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, tun, StateFailed, 20*time.Second)
+	tun.Stop()
+	mu.Lock()
+	defer mu.Unlock()
+	if fmt.Sprint(tried) != "[0 0 0]" {
+		t.Fatalf("a rejected user is not a DPI problem: %v", tried)
 	}
 }
