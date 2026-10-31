@@ -220,6 +220,78 @@ func (d *Darwin) SetServerRoutes(servers []netip.Addr, via DefaultRoute) error {
 	return firstErr
 }
 
+// RepairRoutes restores routes macOS dropped while the default route stayed
+// the same: after sleep or a Wi-Fi reconnect it rebuilds the interface's
+// routes without our scoped default, and direct connections then fail with
+// "network is unreachable".
+func (d *Darwin) RepairRoutes(servers []netip.Addr, via DefaultRoute) []string {
+	if !via.Valid() || !via.Gateway.IsValid() {
+		return nil
+	}
+	rib, err := route.FetchRIB(unix.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return nil
+	}
+	msgs, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return nil
+	}
+	scoped, hosts := presentRoutes(msgs, via.Index)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var fixed []string
+	if !scoped {
+		d.st.ScopedRoute = "" // it is gone, whoever added it
+		d.setScopedDefaultLocked(via)
+		fixed = append(fixed, "scoped default route via "+via.Interface)
+	}
+	n := 0
+	for _, s := range servers {
+		if s.Is4() && !hosts[s] {
+			if _, err := d.run("", "route", ServerRouteCommand(true, s, via.Gateway)[1:]...); err == nil {
+				n++
+			}
+		}
+	}
+	if n > 0 {
+		fixed = append(fixed, fmt.Sprintf("%d server route(s)", n))
+	}
+	if len(fixed) > 0 {
+		d.saveLocked()
+	}
+	return fixed
+}
+
+// presentRoutes reports whether a default route scoped to interface index
+// exists, and which IPv4 host routes do.
+func presentRoutes(msgs []route.Message, index int) (scoped bool, hosts map[netip.Addr]bool) {
+	hosts = map[netip.Addr]bool{}
+	for _, m := range msgs {
+		rm, ok := m.(*route.RouteMessage)
+		if !ok || len(rm.Addrs) <= unix.RTAX_DST {
+			continue
+		}
+		dst, ok := rm.Addrs[unix.RTAX_DST].(*route.Inet4Addr)
+		if !ok {
+			continue
+		}
+		if rm.Flags&unix.RTF_HOST != 0 {
+			hosts[netip.AddrFrom4(dst.IP)] = true
+			continue
+		}
+		if rm.Flags&unix.RTF_IFSCOPE == 0 || rm.Index != index || dst.IP != [4]byte{} {
+			continue
+		}
+		if len(rm.Addrs) > unix.RTAX_NETMASK {
+			if mask, ok := rm.Addrs[unix.RTAX_NETMASK].(*route.Inet4Addr); ok && mask.IP != [4]byte{} {
+				continue
+			}
+		}
+		scoped = true
+	}
+	return scoped, hosts
+}
+
 // setScopedDefaultLocked makes sure sockets bound to the physical interface
 // have a route. An existing scoped route (configd usually installs one) is
 // left alone and not removed later; one we add is recorded in the state.

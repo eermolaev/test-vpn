@@ -54,6 +54,9 @@ type Platform interface {
 	// SetServerRoutes routes the VPN servers via the physical gateway,
 	// replacing the previous set; nil removes them.
 	SetServerRoutes(servers []netip.Addr, via DefaultRoute) error
+	// RepairRoutes re-adds the scoped default route of via and the server
+	// routes when the system removed them, and says what it restored.
+	RepairRoutes(servers []netip.Addr, via DefaultRoute) []string
 	// SetDNS points the system resolver to servers (saving the originals).
 	SetDNS(servers []netip.Addr) error
 	// RestoreDNS restores the saved resolver configuration.

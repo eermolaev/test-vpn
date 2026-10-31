@@ -519,6 +519,8 @@ func (d *Daemon) monitor(ctx context.Context, s Settings) {
 			d.plat.EnableKillSwitch(platform.KillSwitch{Tun: d.tunName, Servers: d.servers, AllowLAN: cur.AllowLAN, LAN: route.LAN})
 			d.tun.NetworkChanged(route.Interface+"|"+route.Gateway.String(), route.Index, route.Interface)
 			d.checkDirectLocked(cur)
+		} else if fixed := d.plat.RepairRoutes(d.servers, route); len(fixed) > 0 {
+			d.logf("restored routes the system removed: %s", strings.Join(fixed, ", "))
 		}
 		d.plat.SetDNS(toAddrs(dnsServers(cur)))
 		if d.failoverLocked(cur) {

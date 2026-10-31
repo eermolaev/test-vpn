@@ -22,6 +22,7 @@ type Fake struct {
 	servers   []netip.Addr
 	engineTun string
 	OnCreate  func(app *netstack.PipeIO) // called when the tunnel is created
+	repaired  []string
 	// ConflictList is returned by Conflicts.
 	ConflictList []string
 }
@@ -97,6 +98,21 @@ func (f *Fake) SetServerRoutes(servers []netip.Addr, via DefaultRoute) error {
 	f.servers = servers
 	f.log("server-routes %v", servers)
 	return nil
+}
+
+// DropRoutes makes the next RepairRoutes report what as restored.
+func (f *Fake) DropRoutes(what ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repaired = what
+}
+
+func (f *Fake) RepairRoutes([]netip.Addr, DefaultRoute) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.repaired
+	f.repaired = nil
+	return r
 }
 
 func (f *Fake) SetDNS(servers []netip.Addr) error {

@@ -455,4 +455,18 @@ func TestDaemonProxy(t *testing.T) {
 	if got := exchange(t, c, echo.TCP, []byte("hi")); got != "echo:hi" {
 		t.Fatalf("proxy flow: %q", got)
 	}
+	// Routes macOS drops after sleep are restored by the monitor and logged.
+	e.plat.DropRoutes("scoped default route via en0")
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var logs []LogLine
+		e.cl.Call(CmdLogs, LogsArgs{}, &logs)
+		if len(logs) > 0 && strings.Contains(logs[len(logs)-1].Text, "restored routes the system removed: scoped default route via en0") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no repair log: %v", logs)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
