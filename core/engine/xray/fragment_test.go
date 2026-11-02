@@ -47,19 +47,33 @@ func (r *recConn) Write(b []byte) (int, error) {
 func TestFragmentTLSHello(t *testing.T) {
 	body := bytes.Repeat([]byte{7}, 300)
 	hello := append([]byte{22, 3, 1, 1, 44}, body...)
-	r := &recConn{}
-	fc := &fragmentConn{Conn: r, f: Fragments[2]}
-	if n, err := fc.Write(append(hello, 9, 9)); err != nil || n != len(hello)+2 {
-		t.Fatal(n, err)
-	}
-	var got []byte
-	for i, s := range r.segs[:len(r.segs)-1] {
-		if s[0] != 22 || int(s[3])<<8|int(s[4]) != len(s)-5 || len(s)-5 > 30 {
-			t.Fatalf("segment %d is not a small TLS record: %v", i, s[:5])
+	for _, k := range []int{2, 3} {
+		f := Fragments[k]
+		r := &recConn{}
+		fc := &fragmentConn{Conn: r, f: f}
+		if n, err := fc.Write(append(hello, 9, 9)); err != nil || n != len(hello)+2 {
+			t.Fatal(f.Name, n, err)
 		}
-		got = append(got, s[5:]...)
-	}
-	if !bytes.Equal(got, body) || !bytes.Equal(r.segs[len(r.segs)-1], []byte{9, 9}) {
-		t.Fatal("records must carry the ClientHello and then the rest unchanged")
+		recs := r.segs[:len(r.segs)-1]
+		if f.Interval[1] == 0 {
+			if len(recs) != 1 {
+				t.Fatalf("%s: records must go out in one write, got %d", f.Name, len(recs))
+			}
+		} else if len(recs) < 10 {
+			t.Fatalf("%s: each record must be its own write, got %d", f.Name, len(recs))
+		}
+		var got []byte
+		rest := bytes.Join(recs, nil)
+		for len(rest) > 0 {
+			l := int(rest[3])<<8 | int(rest[4])
+			if rest[0] != 22 || l > 30 || 5+l > len(rest) {
+				t.Fatalf("%s: not a small TLS record: %v", f.Name, rest[:5])
+			}
+			got = append(got, rest[5:5+l]...)
+			rest = rest[5+l:]
+		}
+		if !bytes.Equal(got, body) || !bytes.Equal(r.segs[len(r.segs)-1], []byte{9, 9}) {
+			t.Fatalf("%s: records must carry the ClientHello and then the rest unchanged", f.Name)
+		}
 	}
 }

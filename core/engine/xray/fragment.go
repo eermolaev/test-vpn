@@ -21,11 +21,15 @@ type Fragment struct {
 }
 
 // Fragments are the presets the tunnel walks through when failures look like
-// DPI; index 0 sends the ClientHello unchanged.
+// DPI; index 0 sends the ClientHello unchanged. With no interval the TLS
+// records go out in one write, which costs nothing; a pause between pieces
+// is paid by every new connection (90 pieces of 10-30 bytes at 5-15 ms add
+// about a second), so the slow presets come last.
 var Fragments = []Fragment{
 	{Name: "none"},
-	{Name: "tlshello 100-200", Packets: "tlshello", Length: [2]int{100, 200}, Interval: [2]int{10, 20}},
-	{Name: "tlshello 10-30", Packets: "tlshello", Length: [2]int{10, 30}, Interval: [2]int{5, 15}},
+	{Name: "tlshello 100-200", Packets: "tlshello", Length: [2]int{100, 200}},
+	{Name: "tlshello 10-30", Packets: "tlshello", Length: [2]int{10, 30}},
+	{Name: "tlshello 10-30 slow", Packets: "tlshello", Length: [2]int{10, 30}, Interval: [2]int{5, 15}},
 	{Name: "tcp 1-5", Packets: "1-3", Length: [2]int{1, 5}, Interval: [2]int{1, 3}},
 }
 
@@ -63,14 +67,25 @@ func (c *fragmentConn) Write(b []byte) (int, error) {
 			return c.Conn.Write(b)
 		}
 		data := b[5:end]
+		// Like xray: with no interval the records go out in one write.
+		var hello []byte
 		for from := 0; from < len(data); {
 			to := min(from+between(c.f.Length), len(data))
 			rec := append([]byte{b[0], b[1], b[2], byte((to - from) >> 8), byte(to - from)}, data[from:to]...)
+			from = to
+			if c.f.Interval[1] == 0 {
+				hello = append(hello, rec...)
+				continue
+			}
 			if _, err := c.Conn.Write(rec); err != nil {
 				return 0, err
 			}
-			from = to
 			c.pause()
+		}
+		if len(hello) > 0 {
+			if _, err := c.Conn.Write(hello); err != nil {
+				return 0, err
+			}
 		}
 		if len(b) > end {
 			n, err := c.Conn.Write(b[end:])

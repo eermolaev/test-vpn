@@ -548,6 +548,15 @@ func TestFragmentationFoundAndRemembered(t *testing.T) {
 }
 
 func TestNoFragmentationForNonDPIFailures(t *testing.T) {
+	for _, diag := range []error{
+		errclass.Wrap(errclass.ServerClosed, errors.New("unknown user")),
+		xray.UnreachableError{Err: errclass.Wrap(errclass.TCPReset, errors.New("connect: connection refused"))},
+	} {
+		t.Run(string(errclass.Classify(diag)), func(t *testing.T) { testNoFragmentation(t, diag) })
+	}
+}
+
+func testNoFragmentation(t *testing.T, diag error) {
 	vless := &profile.VLESSConfig{Address: "203.0.113.10", Port: 443, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Security: "reality", Network: "raw", SNI: "a.example", PublicKey: "k", ShortID: "ab"}
 	var tried []int
 	var mu sync.Mutex
@@ -562,7 +571,7 @@ func TestNoFragmentationForNonDPIFailures(t *testing.T) {
 		mu.Lock()
 		tried = append(tried, tr.VLESS.Fragment)
 		mu.Unlock()
-		return diagEngine{diag: errclass.Wrap(errclass.ServerClosed, errors.New("unknown user"))}, nil
+		return diagEngine{diag: diag}, nil
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -572,6 +581,6 @@ func TestNoFragmentationForNonDPIFailures(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if fmt.Sprint(tried) != "[0 0 0]" {
-		t.Fatalf("a rejected user is not a DPI problem: %v", tried)
+		t.Fatalf("%v is not a DPI problem: %v", diag, tried)
 	}
 }

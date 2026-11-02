@@ -397,10 +397,12 @@ func (h healthFailure) Unwrap() error { return h.error }
 
 // looksLikeDPI reports whether a failure is one that splitting the
 // ClientHello may get past: the handshake gets no answer or is cut off, or
-// nothing comes back after it.
+// nothing comes back after it. A server that refuses or ignores the TCP
+// connect never saw the ClientHello.
 func looksLikeDPI(err error) bool {
 	var h healthFailure
-	if !errors.As(err, &h) {
+	var u xray.UnreachableError
+	if !errors.As(err, &h) || errors.As(err, &u) {
 		return false
 	}
 	switch errclass.Classify(err) {

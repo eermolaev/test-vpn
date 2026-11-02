@@ -39,7 +39,7 @@ func Diagnose(ctx context.Context, c *profile.VLESSConfig, dns netip.AddrPort) e
 		if cl != errclass.TCPReset && cl != errclass.NoNetwork && cl != errclass.DNS {
 			cl = errclass.TCPTimeout
 		}
-		return errclass.Wrap(cl, fmt.Errorf("server %s is not reachable over TCP: %w", addr, err))
+		return UnreachableError{errclass.Wrap(cl, fmt.Errorf("server %s is not reachable over TCP: %w", addr, err))}
 	}
 	defer raw.Close()
 	tcpTime := time.Since(start)
@@ -76,6 +76,13 @@ func Diagnose(ctx context.Context, c *profile.VLESSConfig, dns netip.AddrPort) e
 	}
 	return errclass.Wrap(errclass.Routing, fmt.Errorf("%s; VLESS request: %w", ok, err))
 }
+
+// UnreachableError is a failed TCP connect to the server: no ClientHello was
+// sent, so splitting it cannot help.
+type UnreachableError struct{ Err error }
+
+func (e UnreachableError) Error() string { return e.Err.Error() }
+func (e UnreachableError) Unwrap() error { return e.Err }
 
 // diagnoseProxy checks that the proxy accepts TCP connections. The proxy
 // protocol itself is not repeated: its errors reach the log through xray.
