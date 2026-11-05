@@ -211,7 +211,7 @@ func TestKeysAndCheck(t *testing.T) {
 		t.Fatalf("check result not shown:\n%s", text)
 	}
 	run(m, key("?"))
-	if !strings.Contains(checkGeometry(t, m, 120, 40), "sudo testvpn unblock") {
+	if !strings.Contains(checkGeometry(t, m, 120, 40), adminCmd("unblock")) {
 		t.Fatal("help not shown")
 	}
 	run(m, key("z"))
@@ -311,7 +311,7 @@ func TestServiceDown(t *testing.T) {
 	be.statusErr = errors.New("dial unix /var/run/testvpn.sock: no such file")
 	m := New(be)
 	exec(m, m.Init(), 0)
-	if !strings.Contains(checkGeometry(t, m, 100, 30), "sudo testvpn install") {
+	if !strings.Contains(checkGeometry(t, m, 100, 30), adminCmd("install")) {
 		t.Fatal("service down hint missing")
 	}
 }

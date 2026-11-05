@@ -1,11 +1,11 @@
 # test-vpn
 
-Personal VPN client for macOS 26+ and iOS 26+ with AmneziaWG and
+Personal console VPN client for macOS, Linux and Windows with AmneziaWG and
 VLESS + REALITY, automatic fallback between them, a strict kill switch,
 domain exclusions and exit verification (IP, country, DNS/IPv6/WebRTC
-leaks).
+leaks). A privileged background service runs the tunnel; `testvpn` opens a
+terminal dashboard and has the same commands on every system.
 
+- Install and use: [docs/CLI.md](docs/CLI.md)
 - Specification: [docs/spec/03-stealth-and-egress.md](docs/spec/03-stealth-and-egress.md)
-- Console version for macOS (no Apple Developer account needed): [docs/MACOS-CLI.md](docs/MACOS-CLI.md)
-- App for iOS/macOS (needs a paid Apple Developer account): [docs/BUILD.md](docs/BUILD.md)
-- Go core: [core/](core) · Apple app: [apple/](apple)
+- Source: [core/](core) (Go; the command is [core/cmd/testvpn](core/cmd/testvpn))

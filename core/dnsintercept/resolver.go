@@ -108,7 +108,9 @@ func (r *Resolver) Serve(ctx context.Context, q []byte) []byte {
 		} else {
 			resp, err = r.try(ctx, cfg.TunnelServers, func(ctx context.Context, s netip.AddrPort) ([]byte, error) {
 				resp, err := r.muxFor(tunnel, s).exchange(ctx, q)
-				if err == nil && truncated(resp) {
+				if (err == nil && truncated(resp)) || (err != nil && ctx.Err() == nil) {
+					// Truncated, or the server does not relay UDP (the
+					// engine fails at once): ask over TCP.
 					return exchangeTCP(ctx, tunnel, s, q)
 				}
 				return resp, err

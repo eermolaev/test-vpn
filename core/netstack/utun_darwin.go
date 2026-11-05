@@ -17,9 +17,9 @@ type UtunIO struct {
 	wb  []byte
 }
 
-// NewUtunIO wraps a duplicate of fd. The original fd is owned by the system
-// (the packet tunnel provider tears the interface down itself) and is never
-// closed here; Close closes only the duplicate, which also unblocks readers.
+// NewUtunIO wraps a duplicate of fd. The original fd stays owned by the
+// caller, which closes it to remove the interface; Close closes only the
+// duplicate, which also unblocks readers.
 func NewUtunIO(fd int, mtu int) (*UtunIO, error) {
 	dup, err := unix.Dup(fd)
 	if err != nil {

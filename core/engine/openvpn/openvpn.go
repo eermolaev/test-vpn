@@ -1,5 +1,5 @@
 // Package openvpn runs the openvpn binary as an engine. openvpn opens its own
-// utun interface but is told not to touch routes or DNS; the engine reaches
+// tun interface but is told not to touch routes or DNS; the engine reaches
 // the tunnel by binding sockets to that interface, so the daemon keeps
 // control of routing, the kill switch and exclusions.
 package openvpn
@@ -19,7 +19,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/eermolaev/test-vpn/core/direct"
@@ -27,12 +26,12 @@ import (
 	"github.com/eermolaev/test-vpn/core/profile"
 )
 
-// Candidates are the usual install locations; the daemon runs under launchd
-// with a minimal PATH.
-var Candidates = []string{"/opt/homebrew/sbin/openvpn", "/usr/local/sbin/openvpn", "/opt/local/sbin/openvpn", "/usr/sbin/openvpn"}
+// Candidates are the usual install locations (see os_*.go); the daemon runs
+// under a service manager with a minimal PATH.
+var Candidates = candidates
 
 // ErrNotInstalled means no openvpn binary was found.
-var ErrNotInstalled = errors.New("openvpn is not installed (brew install openvpn)")
+var ErrNotInstalled = errors.New("openvpn is not installed (" + installHint + ")")
 
 // Find returns the path of the openvpn binary.
 func Find() (string, error) {
@@ -76,7 +75,7 @@ func Args(cfg string, c *profile.OpenVPNConfig) []string {
 	return []string{
 		"--config", cfg,
 		"--remote", c.Host, strconv.Itoa(c.Port), proto,
-		"--dev", "utun",
+		"--dev", devType,
 		"--route-noexec", "--route-nopull",
 		"--script-security", "1",
 		"--persist-tun", "--auth-nocache",
@@ -86,7 +85,7 @@ func Args(cfg string, c *profile.OpenVPNConfig) []string {
 }
 
 var (
-	reDevice = regexp.MustCompile(`Opened utun device (utun\d+)`)
+	reDevice = regexp.MustCompile(deviceRE)
 	reReady  = regexp.MustCompile(`Initialization Sequence Completed`)
 )
 
@@ -107,6 +106,9 @@ func classify(line string) error {
 
 // Start runs openvpn and waits until the tunnel is up or ctx ends.
 func Start(ctx context.Context, c *profile.OpenVPNConfig, o Options) (*Engine, error) {
+	if unsupported != "" {
+		return nil, errclass.Wrap(errclass.Config, errors.New(unsupported))
+	}
 	bin := o.Binary
 	if bin == "" {
 		var err error
@@ -132,7 +134,7 @@ func Start(ctx context.Context, c *profile.OpenVPNConfig, o Options) (*Engine, e
 	}
 	cmd := exec.Command(bin, Args(cfg, c)...)
 	cmd.Dir = dir
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = procAttr()
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	if err := cmd.Start(); err != nil {
@@ -227,7 +229,7 @@ func Start(ctx context.Context, c *profile.OpenVPNConfig, o Options) (*Engine, e
 	}
 }
 
-// Interface is the utun interface opened by openvpn.
+// Interface is the tun interface opened by openvpn.
 func (e *Engine) Interface() string { return e.ifName }
 
 // DialTCP connects to dst through the OpenVPN tunnel.
@@ -247,7 +249,7 @@ func (e *Engine) NativeUDP() bool { return true }
 func (e *Engine) Close() error {
 	e.once.Do(func() {
 		if e.cmd.Process != nil {
-			e.cmd.Process.Signal(syscall.SIGTERM)
+			stopProcess(e.cmd.Process)
 			select {
 			case <-e.exited:
 			case <-time.After(3 * time.Second):

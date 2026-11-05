@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -48,17 +49,25 @@ func TestArgsKeepRoutingWithDaemon(t *testing.T) {
 }
 
 func TestStartUp(t *testing.T) {
-	var ifc string
+	// An existing interface stands in for openvpn's.
+	var ifc, line string
 	ifs, _ := net.Interfaces()
 	for _, i := range ifs {
-		if strings.HasPrefix(i.Name, "utun") {
-			ifc = i.Name
+		switch runtime.GOOS {
+		case "darwin":
+			if strings.HasPrefix(i.Name, "utun") {
+				ifc, line = i.Name, "Opened utun device "+i.Name
+			}
+		case "linux":
+			if i.Flags&net.FlagLoopback != 0 {
+				ifc, line = i.Name, "TUN/TAP device "+i.Name+" opened"
+			}
 		}
 	}
 	if ifc == "" {
-		t.Skip("no utun interface to stand in for openvpn's")
+		t.Skip("no interface to stand in for openvpn's")
 	}
-	e, logs, err := start(t, "echo 'Opened utun device "+ifc+"'; echo 'Initialization Sequence Completed'; exec sleep 30", 5*time.Second)
+	e, logs, err := start(t, "echo '"+line+"'; echo 'Initialization Sequence Completed'; exec sleep 30", 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +86,7 @@ func TestStartUp(t *testing.T) {
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatal("config with keys must be removed")
 	}
-	if len(logs) != 2 || logs[0] != "openvpn: Opened utun device "+ifc {
+	if len(logs) != 2 || logs[0] != "openvpn: "+line {
 		t.Fatalf("logs: %q", logs)
 	}
 }

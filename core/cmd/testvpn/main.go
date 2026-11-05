@@ -1,5 +1,6 @@
-// Command testvpn is the standalone VPN client for macOS: a root daemon
-// (installed as a LaunchDaemon) and a terminal dashboard.
+// Command testvpn is the standalone VPN client for macOS, Linux and Windows:
+// a privileged daemon (a LaunchDaemon, a systemd unit or a Windows service)
+// and a terminal dashboard.
 //
 //	testvpn                 open the dashboard
 //	testvpn status          print the status
@@ -9,7 +10,10 @@
 //	sudo testvpn install    install and start the daemon
 //	sudo testvpn uninstall  stop and remove the daemon
 //	sudo testvpn unblock    remove the kill switch and DNS override
-//	testvpn daemon          run the daemon (used by launchd)
+//	testvpn daemon          run the daemon (used by the service manager)
+//
+// On Windows the privileged commands run in an Administrator terminal
+// instead of with sudo.
 package main
 
 import (
@@ -21,6 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -33,18 +38,17 @@ import (
 	"github.com/eermolaev/test-vpn/core/tui"
 )
 
-const (
-	defaultDir = "/Library/Application Support/TestVPN"
-	label      = "com.testvpn.daemon"
-)
-
 var (
 	socketPath = flag.String("socket", ipc.DefaultSocket, "daemon socket")
 	stateDir   = flag.String("dir", defaultDir, "daemon state directory (root only)")
 )
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `testvpn %s — AmneziaWG and VLESS+REALITY client
+	sudo, admin := "sudo ", ""
+	if runtime.GOOS == "windows" {
+		sudo, admin = "", "\nprivileged commands (install, uninstall, unblock) need an Administrator terminal\n"
+	}
+	fmt.Fprintf(os.Stderr, `testvpn %[1]s — AmneziaWG and VLESS+REALITY client
 
 usage:
   testvpn                 open the dashboard
@@ -58,10 +62,10 @@ usage:
   testvpn failover N|off  switch to the next profile after N failed attempts
                           (default 5)
   testvpn check           check exit IP, country and leaks
-  sudo testvpn install    install and start the background service
-  sudo testvpn uninstall  stop and remove the service (--purge also deletes profiles)
-  sudo testvpn unblock    emergency: remove the kill switch and DNS override
-`, daemon.Version)
+  %[2]stestvpn install    install and start the background service
+  %[2]stestvpn uninstall  stop and remove the service (--purge also deletes profiles)
+  %[2]stestvpn unblock    emergency: remove the kill switch and DNS override
+%[3]s`, daemon.Version, sudo, admin)
 }
 
 func main() {
@@ -125,9 +129,16 @@ func withClient(f func(*ipc.Client) error) error {
 	return f(c)
 }
 
+// userDataDir holds per-user data (the GeoIP database): ~/Library/Application
+// Support/TestVPN on macOS, ~/.config/TestVPN on Linux, %AppData%\TestVPN on
+// Windows.
 func userDataDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library", "Application Support", "TestVPN")
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(dir, "TestVPN")
 }
 
 func runTUI() error {

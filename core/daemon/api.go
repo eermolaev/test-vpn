@@ -39,7 +39,7 @@ type Settings struct {
 	ExclusionDNSMode string   `json:"exclusionDNSMode"`
 	BlockQUIC        bool     `json:"blockQUIC"`
 	AllowLAN         bool     `json:"allowLAN"`
-	// AutoConnect: what to do when the Mac boots (AutoConnect* constants).
+	// AutoConnect: what to do when the computer boots (AutoConnect* constants).
 	AutoConnect string `json:"autoConnect,omitempty"`
 	// FailoverAttempts: after this many failed connection attempts the
 	// daemon switches to the next profile. 0 means DefaultFailoverAttempts,

@@ -14,9 +14,6 @@ import (
 	"time"
 )
 
-// DefaultSocket is the daemon socket path on macOS.
-const DefaultSocket = "/var/run/testvpn.sock"
-
 // Request is one call.
 type Request struct {
 	ID   uint64          `json:"id"`
@@ -51,16 +48,19 @@ func Listen(path string, allowedUID int, h Handler) (*Server, error) {
 		return nil, err
 	}
 	if allowedUID >= 0 {
-		if err := os.Chown(path, allowedUID, -1); err != nil {
+		if err := restrictToUID(path, allowedUID); err != nil {
 			ln.Close()
 			return nil, err
 		}
-		os.Chmod(path, 0o600)
 	}
+	return serve(ln, allowedUID, h), nil
+}
+
+func serve(ln net.Listener, allowedUID int, h Handler) *Server {
 	s := &Server{ln: ln, handler: h, allowedUID: allowedUID}
 	s.wg.Add(1)
 	go s.accept()
-	return s, nil
+	return s
 }
 
 func (s *Server) accept() {
@@ -122,7 +122,7 @@ type Client struct {
 }
 
 // ErrNotRunning means the daemon socket is not available.
-var ErrNotRunning = errors.New("the VPN service is not running (install it with: sudo testvpn install)")
+var ErrNotRunning = errors.New("the VPN service is not running (install it with: " + installHint + ")")
 
 // Dial connects to the daemon.
 func Dial(path string) (*Client, error) {

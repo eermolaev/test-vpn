@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 
@@ -17,22 +16,6 @@ import (
 	"golang.org/x/net/route"
 	"golang.org/x/sys/unix"
 )
-
-// Runner executes a command with optional stdin and returns combined output.
-type Runner func(stdin string, name string, args ...string) (string, error)
-
-// ExecRunner runs commands with os/exec.
-func ExecRunner(stdin string, name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	if stdin != "" {
-		cmd.Stdin = strings.NewReader(stdin)
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
-}
 
 // state survives daemon crashes so that `testvpn unblock` can undo changes.
 type state struct {
@@ -85,8 +68,8 @@ const (
 	utunOptIfname   = 2
 )
 
-// CreateTUN creates a utun interface through the kernel control socket; no
-// Network Extension is involved, so this needs root.
+// CreateTUN creates a utun interface through the kernel control socket,
+// which needs root.
 func (d *Darwin) CreateTUN(mtu int) (netstack.PacketIO, string, error) {
 	fd, err := unix.Socket(unix.AF_SYSTEM, unix.SOCK_DGRAM, sysprotoControl)
 	if err != nil {

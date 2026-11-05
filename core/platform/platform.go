@@ -1,7 +1,8 @@
-// Package platform configures the operating system for the standalone
-// (non-Network-Extension) client: tunnel interface, routes, DNS and the
-// packet-filter kill switch. The macOS implementation runs as root in the
-// daemon; Fake records calls for tests.
+// Package platform configures the operating system for the daemon: tunnel
+// interface, routes, DNS and the kill switch. Darwin (utun, route, scutil,
+// pf), Linux (/dev/net/tun, iproute2, systemd-resolved or resolv.conf,
+// nftables) and Windows (Wintun, IP Helper, WFP) run with administrator
+// rights in the daemon; Fake records calls for tests.
 package platform
 
 import (
@@ -10,7 +11,7 @@ import (
 	"github.com/eermolaev/test-vpn/core/netstack"
 )
 
-// Tunnel interface addresses (same as the packet tunnel provider).
+// Tunnel interface addresses.
 var (
 	TunAddr4 = netip.MustParseAddr("10.255.0.2")
 	TunPeer4 = netip.MustParseAddr("10.255.0.1")

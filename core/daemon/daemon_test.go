@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,7 +60,14 @@ func startDaemonOpts(t *testing.T, dir string, directDialer engine.Dialer, boot 
 		t.Fatal(err)
 	}
 	e.d = d
-	sock := filepath.Join(dir, "d.sock")
+	// A short directory: t.TempDir() under macOS's $TMPDIR with a long test
+	// name exceeds the 104-byte limit of unix socket paths.
+	sockDir, err := os.MkdirTemp("", "tv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockDir) })
+	sock := filepath.Join(sockDir, "d.sock")
 	srv, err := ipc.Listen(sock, -1, d.Handle)
 	if err != nil {
 		t.Fatal(err)

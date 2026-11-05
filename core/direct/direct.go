@@ -26,7 +26,7 @@ type Dialer struct {
 	cur atomic.Pointer[iface]
 }
 
-// SetInterface sets the physical interface (index for Darwin, name for Linux).
+// SetInterface sets the physical interface (index for Darwin and Windows, name for Linux).
 // index 0 and empty name disable binding.
 func (d *Dialer) SetInterface(index int, name string) {
 	d.cur.Store(&iface{index: index, name: name})

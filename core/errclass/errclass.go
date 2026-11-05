@@ -82,6 +82,9 @@ func Classify(err error) Class {
 	case errors.Is(err, syscall.ENETUNREACH), errors.Is(err, syscall.EHOSTUNREACH), errors.Is(err, syscall.ENETDOWN):
 		return NoNetwork
 	}
+	if c, ok := osClass(err); ok {
+		return c
+	}
 	var recErr tls.RecordHeaderError
 	var alert tls.AlertError
 	if errors.As(err, &recErr) || errors.As(err, &alert) {

@@ -18,7 +18,7 @@ func (m *Model) render() string {
 	var body string
 	if m.statusErr != nil {
 		msg := []string{"", "  " + stBad.Render("Cannot reach the VPN service."), "", "  " + stMain.Render(m.statusErr.Error()), "",
-			"  " + stDim.Render("Install or start it with: sudo testvpn install")}
+			"  " + stDim.Render("Install or start it with: "+adminCmd("install"))}
 		body = box("service", "", msg, w, bodyH, boxDialog)
 	} else if w >= 100 {
 		leftW := min(40, w/3)

@@ -63,7 +63,7 @@ func (helpDialog) View(m *Model, w, h int) string {
 		lines = append(lines, "  "+stKey.Render(fmt.Sprintf("%-4s", r[0]))+"  "+stMain.Render(r[1]))
 	}
 	lines = append(lines, "", "  "+stDim.Render("While disconnected or failed, traffic is blocked (kill switch)."),
-		"  "+stDim.Render("Emergency: sudo testvpn unblock"), "", "  "+stDim.Render("press any key"))
+		"  "+stDim.Render("Emergency: "+adminCmd("unblock")), "", "  "+stDim.Render("press any key"))
 	return box("help", "", lines, w, len(lines)+2, boxDialog)
 }
 
@@ -368,7 +368,7 @@ func (d *settingsDialog) View(m *Model, w, h int) string {
 		"",
 		stDim.Render("  DNS queries go through the VPN to this resolver. Excluded domains"),
 		stDim.Render("  are resolved with it directly. Changes apply without reconnecting."),
-		stDim.Render("  Connect on startup applies after the Mac boots; a service restart"),
+		stDim.Render("  Connect on startup applies after the computer boots; a service restart"),
 		stDim.Render("  (crash, update) always restores the previous state."),
 		stDim.Render("  With several profiles the VPN moves to the next one after this many"),
 		stDim.Render("  failed attempts; traffic stays blocked while it switches."),

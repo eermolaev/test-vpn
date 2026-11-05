@@ -25,7 +25,7 @@ import (
 // Version of the daemon.
 const Version = "0.1.0"
 
-// DefaultMTU of the tunnel interface on macOS.
+// DefaultMTU of the tunnel interface.
 const DefaultMTU = 9000
 
 // Options configure the daemon.
@@ -41,7 +41,7 @@ type Options struct {
 	DirectDialer engine.Dialer
 	// BootTime returns the system boot time (tests); default: from the OS.
 	BootTime func() int64
-	// LogWriter also receives log lines (the launchd log file).
+	// LogWriter also receives log lines (the service log).
 	LogWriter io.Writer
 	// Tunnel overrides tunnel timing (tests).
 	TunePolicy func(*tunnel.Config)
@@ -78,7 +78,7 @@ type Daemon struct {
 // New opens the state directory.
 func New(opts Options) (*Daemon, error) {
 	if opts.MTU == 0 {
-		// Traffic is terminated locally, so the utun MTU is not limited by
+		// Traffic is terminated locally, so the tunnel MTU is not limited by
 		// the path: large packets mean fewer syscalls and per-packet work.
 		opts.MTU = DefaultMTU
 	}
@@ -149,7 +149,7 @@ func (d *Daemon) Start() {
 	d.plat.DisableKillSwitch()
 }
 
-// Shutdown is called when the daemon is stopped by launchd (not a crash):
+// Shutdown is called when the daemon is stopped by the service manager (not a crash):
 // the desired state is kept, so the tunnel comes back on the next start, but
 // the system is left unblocked if the user had disconnected.
 func (d *Daemon) Shutdown() {
@@ -342,7 +342,7 @@ func (d *Daemon) connectLocked(sp storedProfile, s Settings) error {
 		InterfaceName:   route.Interface,
 		MTU:             d.opts.MTU,
 		Settings:        tunnelSettings(s),
-		// A Mac has memory to spare: larger buffers and queue avoid drops
+		// A desktop has memory to spare: larger buffers and queue avoid drops
 		// and window stalls at high speed.
 		Stack: netstack.Options{TCPBufferSize: 4 << 20, QueueSize: 4096, ModerateReceiveBuffer: true},
 	}
