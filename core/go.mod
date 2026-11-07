@@ -13,6 +13,7 @@ require (
 	github.com/oschwald/maxminddb-golang/v2 v2.7.0
 	github.com/refraction-networking/utls v1.8.3-0.20260301010127-aa6edf4b11af
 	github.com/xtls/xray-core v1.260327.0
+	golang.org/x/mobile v0.0.0-20261011034528-197770444867
 	golang.org/x/net v0.61.0
 	golang.org/x/sys v0.49.0
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
