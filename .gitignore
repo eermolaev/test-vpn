@@ -9,3 +9,7 @@ wintun.dll
 /android/build/
 /android/app/build/
 /android/.idea/
+/apple/Frameworks/
+/apple/*.xcodeproj
+/apple/build/
+xcuserdata/
