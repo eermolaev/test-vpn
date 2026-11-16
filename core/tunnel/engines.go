@@ -11,13 +11,24 @@ import (
 	"github.com/eermolaev/test-vpn/core/engine"
 	"github.com/eermolaev/test-vpn/core/engine/awg"
 	"github.com/eermolaev/test-vpn/core/engine/openvpn"
+	sshengine "github.com/eermolaev/test-vpn/core/engine/ssh"
 	"github.com/eermolaev/test-vpn/core/engine/xray"
 	"github.com/eermolaev/test-vpn/core/errclass"
+	"github.com/eermolaev/test-vpn/core/fallback"
 	"github.com/eermolaev/test-vpn/core/profile"
 )
 
-// DefaultStarter starts the real engines.
-func DefaultStarter(logf func(string)) Starter {
+// DefaultStarter starts the real engines without persistent memory: SSH
+// server keys are then trusted on first use only within the process.
+func DefaultStarter(logf func(string)) Starter { return NewStarter(logf, nil) }
+
+// NewStarter starts the real engines; mem keeps SSH server keys seen on
+// first use (may be nil).
+func NewStarter(logf func(string), mem *fallback.Memory) Starter {
+	if mem == nil {
+		mem = fallback.NewMemory(nil)
+	}
+	keys := hostKeys{mem}
 	return func(ctx context.Context, t profile.Transport) (engine.Engine, error) {
 		switch {
 		case t.Policy == profile.PolicyForbidden:
@@ -42,6 +53,10 @@ func DefaultStarter(logf func(string)) Starter {
 			return xray.StartProxy(t.Proxy, t.Kind, logf)
 		case t.OpenVPN != nil:
 			return openvpn.Start(ctx, t.OpenVPN, openvpn.Options{Logf: logf})
+		case t.Hysteria != nil:
+			return xray.StartHysteria(t.Hysteria, logf)
+		case t.SSH != nil:
+			return sshengine.Start(ctx, t.SSH, sshengine.Options{Logf: logf, HostKeys: keys})
 		}
 		return nil, errclass.Wrap(errclass.Config, errors.New("empty transport"))
 	}
@@ -63,3 +78,9 @@ func tcpReachable(ctx context.Context, host string, port int) error {
 	c.Close()
 	return nil
 }
+
+// hostKeys stores SSH server keys in the transport memory.
+type hostKeys struct{ mem *fallback.Memory }
+
+func (h hostKeys) Get(key string) string       { return h.mem.Preferred(key) }
+func (h hostKeys) Set(key, fingerprint string) { h.mem.Remember(key, fingerprint) }

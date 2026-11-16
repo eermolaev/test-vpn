@@ -372,7 +372,7 @@ func (d *Daemon) connectLocked(sp storedProfile, s Settings) error {
 // an engine with its own tunnel (openvpn). It must not take d.mu: it runs on
 // the tunnel goroutine, which Disconnect waits for while holding d.mu.
 func (d *Daemon) starter() tunnel.Starter {
-	base := tunnel.DefaultStarter(d.log)
+	base := tunnel.NewStarter(d.log, d.mem)
 	if d.opts.Starter != nil {
 		base = d.opts.Starter
 	}

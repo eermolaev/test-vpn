@@ -28,6 +28,8 @@ const (
 	ServerSilent  Class = "server_silent"  // handshake works, nothing comes back through the server
 	AWGMismatch   Class = "awg_mismatch"   // server answers, obfuscation/version differs
 	Routing       Class = "routing"        // tunnel up, health check through it fails
+	Auth          Class = "auth"           // the server rejects the login (SSH)
+	HostKey       Class = "host_key"       // the server key differs from the pinned one
 	Config        Class = "config"         // invalid profile or settings
 	Canceled      Class = "canceled"       // stopped by the user
 	Unknown       Class = "unknown"
@@ -137,6 +139,10 @@ func (c Class) Message() string {
 		return "The server answered, but AmneziaWG parameters or protocol version do not match."
 	case Routing:
 		return "The tunnel is up, but traffic does not pass through it."
+	case Auth:
+		return "The server rejects the user name, password or key."
+	case HostKey:
+		return "The server key differs from the remembered one. The connection may be intercepted, or the server was reinstalled; if so, add its new key to the link as hostkey=SHA256:…"
 	case Config:
 		return "The profile or settings are invalid."
 	case Canceled:

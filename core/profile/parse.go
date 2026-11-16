@@ -6,8 +6,8 @@ import (
 )
 
 // Parse detects the format of input (pasted text, file contents or a decoded
-// QR code) and parses it. Several links (vless://, ss://, socks5://, http://)
-// separated by newlines become one profile with several transports.
+// QR code) and parses it. Several links (vless://, ss://, socks5://, http://,
+// ssh://, hysteria2://) separated by newlines become one profile with several transports.
 func Parse(input string) (*Profile, error) {
 	s := strings.TrimSpace(strings.TrimPrefix(input, "\xef\xbb\xbf"))
 	switch {
@@ -15,7 +15,7 @@ func Parse(input string) (*Profile, error) {
 		return nil, invalid("empty input")
 	case hasPrefixFold(s, amneziaScheme):
 		return ParseAmneziaKey(s)
-	case hasPrefixFold(s, "vless://") || isProxyLink(s):
+	case hasPrefixFold(s, "vless://") || hasPrefixFold(s, "ssh://") || isHysteriaLink(s) || isProxyLink(s):
 		p := &Profile{}
 		for _, line := range strings.Split(s, "\n") {
 			line = strings.TrimSpace(line)
@@ -25,9 +25,14 @@ func Parse(input string) (*Profile, error) {
 			var t *Transport
 			var name string
 			var err error
-			if hasPrefixFold(line, "vless://") {
+			switch {
+			case hasPrefixFold(line, "vless://"):
 				t, name, err = ParseVLESSURL(line)
-			} else {
+			case hasPrefixFold(line, "ssh://"):
+				t, name, err = ParseSSHURL(line)
+			case isHysteriaLink(line):
+				t, name, err = ParseHysteriaURL(line)
+			default:
 				t, name, err = ParseProxyURL(line)
 			}
 			if err != nil {

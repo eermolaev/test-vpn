@@ -59,7 +59,8 @@ cd apple && xcodebuild -project VPN.xcodeproj -scheme VPNApp \
 
 1. **Import a profile:** paste a `vless://` link (several lines become one
    profile with several transports), an AmneziaWG `.conf`, an Amnezia
-   `vpn://` key or an xray JSON config; open a file; **scan a QR code** with
+   `vpn://` key, a `hysteria2://` or `ssh://` link (see [CLI.md](CLI.md#hysteria-2)) or an xray JSON
+   config; open a file; **scan a QR code** with
    the camera; or pick an image with a QR code from **Photos** (for example
    a screenshot of a key) or from **Files**. A QR code is imported at once.
    "Add transports to this profile" combines, e.g., AmneziaWG and REALITY

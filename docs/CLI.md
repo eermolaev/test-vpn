@@ -101,10 +101,50 @@ stays blocked during the swap and reconnects by itself.
 | `.ovpn` | OpenVPN (UDP or TCP) | only if the profile has nothing stronger |
 | `socks5://user:pass@host:port`, `http://…`, `https://…` | SOCKS5, HTTP(S) proxy | only if the profile has nothing stronger |
 | `ss://…` (SIP002 or legacy) | Shadowsocks (AEAD and 2022 ciphers) | only if the profile has nothing stronger |
+| `hysteria2://…`, `hy2://…` | Hysteria 2 (QUIC; Salamander, port hopping) | yes, after VLESS and AmneziaWG; `insecure=1` without a pin only when chosen |
+| `ssh://user:pass@host:port` | SSH tunnel (TCP only, like `ssh -D`) | only if the profile has nothing stronger |
 
-WireGuard, OpenVPN and proxies are easy to recognise on the wire, so the client
-never falls back to them from VLESS or AmneziaWG; a profile made only of them
-is used as it is. Several links on separate lines become one profile.
+WireGuard, OpenVPN, proxies and SSH are easy to recognise on the wire, so the
+client never falls back to them from VLESS or AmneziaWG; a profile made only of
+them is used as it is. Several links on separate lines become one profile.
+
+### Hysteria 2
+
+```
+hysteria2://password@host:443/?sni=example.com&obfs=salamander&obfs-password=…&pinSHA256=…#name
+```
+
+- `hy2://` is the same; `user:pass@` is sent as is (userpass auth);
+- port hopping: `host:443,20000-30000` or `mport=20000-30000`;
+- `pinSHA256` pins the server certificate (hex SHA-256, colons allowed):
+  `openssl x509 -in cert.pem -noout -fingerprint -sha256`;
+- `insecure=1` accepts any certificate. Such a transport is not used as an
+  automatic fallback, and the log reminds to add a pin.
+
+Hysteria 2 runs over UDP and carries UDP natively, so QUIC and calls work
+through it. Networks that slow down or block UDP to foreign servers make it
+fail; then VLESS over TCP is the better choice.
+
+### SSH
+
+Any SSH server with TCP forwarding enabled (`AllowTcpForwarding yes`, the
+OpenSSH default) works; nothing is installed on the server. The link:
+
+```
+ssh://user:password@host:22?hostkey=SHA256:…&pk=BASE64#name
+```
+
+- the port defaults to 22;
+- `pk` is a private key file (OpenSSH or PEM) in base64, for example
+  `base64 < ~/.ssh/id_ed25519 | tr -d '\n'`; with `pk` the password is the
+  key passphrase and may be left out for an unencrypted key;
+- `hostkey` pins the server key; get it with
+  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server. Without it
+  the key seen on the first connection is remembered, and a different key later
+  stops the connection (possible interception).
+
+SSH carries only TCP. DNS goes over TCP through the server; UDP apps and QUIC
+do not work, and browsers fall back to TCP by themselves.
 
 OpenVPN uses the `openvpn` binary (`brew install openvpn`, `apt install
 openvpn`); it is not supported on Windows yet. The client keeps

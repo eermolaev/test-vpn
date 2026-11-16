@@ -46,5 +46,11 @@ func StartDNSOn(t testing.TB, ip netip.Addr, answer [4]byte) netip.AddrPort {
 	}
 	t.Cleanup(func() { pc.Close() })
 	go ServeDNS(pc, answer)
-	return netip.MustParseAddrPort(pc.LocalAddr().String())
+	addr := netip.MustParseAddrPort(pc.LocalAddr().String())
+	// DNS over TCP on the same port, for tunnels without UDP (SSH).
+	if ln, err := net.Listen("tcp4", addr.String()); err == nil {
+		t.Cleanup(func() { ln.Close() })
+		go ServeDNSTCP(ln, answer)
+	}
+	return addr
 }

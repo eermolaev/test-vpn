@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"io"
 	"math/big"
 	"net"
 	"net/netip"
@@ -86,25 +87,59 @@ func ServeDNS(pc net.PacketConn, ip [4]byte) {
 		if err != nil {
 			return
 		}
-		var p dnsmessage.Parser
-		h, err := p.Start(buf[:n])
-		if err != nil {
-			continue
+		if out := dnsAnswer(buf[:n], ip); out != nil {
+			pc.WriteTo(out, a)
 		}
-		q, err := p.Question()
-		if err != nil {
-			continue
-		}
-		b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: h.ID, Response: true, RecursionAvailable: true})
-		b.StartQuestions()
-		b.Question(q)
-		b.StartAnswers()
-		if q.Type == dnsmessage.TypeA {
-			b.AResource(dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 120}, dnsmessage.AResource{A: ip})
-		}
-		out, _ := b.Finish()
-		pc.WriteTo(out, a)
 	}
+}
+
+// ServeDNSTCP answers A queries over TCP (RFC 7766 length-prefixed).
+func ServeDNSTCP(ln net.Listener, ip [4]byte) {
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			defer c.Close()
+			for {
+				var l [2]byte
+				if _, err := io.ReadFull(c, l[:]); err != nil {
+					return
+				}
+				q := make([]byte, int(l[0])<<8|int(l[1]))
+				if _, err := io.ReadFull(c, q); err != nil {
+					return
+				}
+				out := dnsAnswer(q, ip)
+				if out == nil {
+					return
+				}
+				c.Write(append([]byte{byte(len(out) >> 8), byte(len(out))}, out...))
+			}
+		}()
+	}
+}
+
+func dnsAnswer(query []byte, ip [4]byte) []byte {
+	var p dnsmessage.Parser
+	h, err := p.Start(query)
+	if err != nil {
+		return nil
+	}
+	q, err := p.Question()
+	if err != nil {
+		return nil
+	}
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: h.ID, Response: true, RecursionAvailable: true})
+	b.StartQuestions()
+	b.Question(q)
+	b.StartAnswers()
+	if q.Type == dnsmessage.TypeA {
+		b.AResource(dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 120}, dnsmessage.AResource{A: ip})
+	}
+	out, _ := b.Finish()
+	return out
 }
 
 // StartDNS starts a loopback DNS server answering A queries with ip.

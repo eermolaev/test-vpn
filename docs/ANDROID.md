@@ -31,7 +31,8 @@ the APK to the phone and open it (allow installing from this source).
 ## Use
 
 1. **Профили → Импорт**: paste a `vless://` link, an AmneziaWG/WireGuard
-   `.conf`, an Amnezia `vpn://` key, `ss://` or `socks5://`, take it from the
+   `.conf`, an Amnezia `vpn://` key, `ss://`, `socks5://`, `hysteria2://` or `ssh://` (see
+   [CLI.md](CLI.md#ssh)), take it from the
    clipboard, pick a file, **scan a QR code** with the camera («Сканировать
    QR») or **pick a QR image from the gallery** («QR из галереи», e.g. a
    screenshot of the key). A QR code is imported at once.

@@ -33,6 +33,12 @@ func (p *Profile) Secrets() []string {
 		if c := t.Proxy; c != nil {
 			add(c.Address, c.Username, c.Password)
 		}
+		if c := t.SSH; c != nil {
+			add(c.Address, c.Username, c.Password, c.PrivateKey)
+		}
+		if c := t.Hysteria; c != nil {
+			add(c.Address, c.Auth, c.ObfsPassword, c.SNI)
+		}
 	}
 	return out
 }
@@ -95,6 +101,25 @@ func (p *Profile) Summarize() Summary {
 			case c.TLS:
 				ts.Detail = "tls"
 			}
+		}
+		if c := t.SSH; c != nil {
+			ts.Detail = "password"
+			if c.PrivateKey != "" {
+				ts.Detail = "key"
+			}
+		}
+		if c := t.Hysteria; c != nil {
+			var d []string
+			if c.ObfsPassword != "" {
+				d = append(d, "salamander")
+			}
+			if c.Ports != "" {
+				d = append(d, "port hopping")
+			}
+			if !c.Verified() {
+				d = append(d, "insecure")
+			}
+			ts.Detail = strings.Join(d, ", ")
 		}
 		s.Transports = append(s.Transports, ts)
 	}

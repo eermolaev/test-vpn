@@ -478,3 +478,62 @@ func TestDaemonProxy(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+func TestDaemonSSH(t *testing.T) {
+	host := testenv.HostIP(t)
+	echo := testenv.StartEchoOn(t, host, "echo:")
+	dns := testenv.StartDNSOn(t, host, [4]byte{1, 2, 3, 4})
+	srv := testenv.StartSSH(t)
+	e := startDaemonOpts(t, t.TempDir(), nil, nil, nil)
+	link := fmt.Sprintf("ssh://%s:%s@%s:%d#SSH", srv.User, srv.Password, srv.Addr, srv.Port)
+	var pe ProfileEntry
+	if err := e.cl.Call(CmdImport, ImportArgs{Text: link}, &pe); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdSetSettings, Settings{DNSServers: []string{dns.String()}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdConnect, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := e.waitConnected(t)
+	if st.Tunnel.TransportKind != string(profile.KindSSH) {
+		t.Fatalf("transport %q", st.Tunnel.TransportKind)
+	}
+	c := <-e.client
+	if got := exchange(t, c, echo.TCP, []byte("hi")); got != "echo:hi" {
+		t.Fatalf("ssh flow: %q", got)
+	}
+	// The server key seen first is remembered for the next connections.
+	if got := e.d.mem.Preferred("ssh-hostkey|" + fmt.Sprintf("%s:%d", srv.Addr, srv.Port)); got != srv.Fingerprint {
+		t.Fatalf("remembered host key %q, want %s", got, srv.Fingerprint)
+	}
+}
+
+func TestDaemonHysteria(t *testing.T) {
+	host := testenv.HostIP(t)
+	echo := testenv.StartEchoOn(t, host, "echo:")
+	dns := testenv.StartDNSOn(t, host, [4]byte{1, 2, 3, 4})
+	srv := testenv.StartHysteria(t, "obfs-pw")
+	c := srv.Config
+	e := startDaemonOpts(t, t.TempDir(), nil, nil, nil)
+	link := fmt.Sprintf("hy2://%s@%s:%d/?sni=%s&obfs=salamander&obfs-password=%s&pinSHA256=%s#Hy2", c.Auth, c.Address, c.Port, c.SNI, c.ObfsPassword, c.PinSHA256)
+	var pe ProfileEntry
+	if err := e.cl.Call(CmdImport, ImportArgs{Text: link}, &pe); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdSetSettings, Settings{DNSServers: []string{dns.String()}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdConnect, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := e.waitConnected(t)
+	if st.Tunnel.TransportKind != string(profile.KindHysteria2) {
+		t.Fatalf("transport %q", st.Tunnel.TransportKind)
+	}
+	cl := <-e.client
+	if got := exchange(t, cl, echo.TCP, []byte("hi")); got != "echo:hi" {
+		t.Fatalf("hysteria flow: %q", got)
+	}
+}

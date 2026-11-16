@@ -44,8 +44,9 @@ type Engine struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	name   string
-	cfg    *profile.VLESSConfig // set for VLESS
-	proxy  *profile.ProxyConfig // set for proxies
+	cfg    *profile.VLESSConfig    // set for VLESS
+	proxy  *profile.ProxyConfig    // set for proxies
+	hy     *profile.HysteriaConfig // set for Hysteria 2
 	once   sync.Once
 }
 
@@ -182,6 +183,11 @@ func StartProxy(c *profile.ProxyConfig, kind profile.Kind, logf func(string)) (*
 }
 
 func start(js []byte, kind profile.Kind, logf func(string)) (*Engine, error) {
+	return startPatched(js, kind, logf, nil)
+}
+
+// startPatched starts xray-core; patch, if set, adjusts the built config.
+func startPatched(js []byte, kind profile.Kind, logf func(string), patch func(*core.Config) error) (*Engine, error) {
 	var jc conf.Config
 	if err := json.Unmarshal(js, &jc); err != nil {
 		return nil, errclass.Wrap(errclass.Config, err)
@@ -189,6 +195,11 @@ func start(js []byte, kind profile.Kind, logf func(string)) (*Engine, error) {
 	pb, err := jc.Build()
 	if err != nil {
 		return nil, errclass.Wrap(errclass.Config, fmt.Errorf("xray config: %w", err))
+	}
+	if patch != nil {
+		if err := patch(pb); err != nil {
+			return nil, errclass.Wrap(errclass.Config, fmt.Errorf("xray config: %w", err))
+		}
 	}
 	if logf != nil {
 		log.RegisterHandler(logHandler(logf))
@@ -277,8 +288,10 @@ func (e *Engine) DialUDP(_ context.Context, dst netip.AddrPort) (net.Conn, error
 	return e.dial(xnet.Network_UDP, dst)
 }
 
-func (e *Engine) Name() string    { return e.name }
-func (e *Engine) NativeUDP() bool { return false }
+func (e *Engine) Name() string { return e.name }
+
+// NativeUDP is true for Hysteria 2, which carries UDP as QUIC datagrams.
+func (e *Engine) NativeUDP() bool { return e.hy != nil }
 
 // Close stops xray-core and all connections.
 func (e *Engine) Close() error {
@@ -295,6 +308,9 @@ func (e *Engine) Close() error {
 func (e *Engine) Diagnose(ctx context.Context, dns netip.AddrPort) error {
 	if e.proxy != nil {
 		return diagnoseProxy(ctx, e.proxy)
+	}
+	if e.hy != nil {
+		return diagnoseHysteria(ctx, e.hy)
 	}
 	return Diagnose(ctx, e.cfg, dns)
 }

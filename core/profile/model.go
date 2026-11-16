@@ -25,6 +25,8 @@ const (
 	KindSOCKS        Kind = "socks"
 	KindHTTPProxy    Kind = "http-proxy"
 	KindShadowsocks  Kind = "shadowsocks"
+	KindSSH          Kind = "ssh"
+	KindHysteria2    Kind = "hysteria2"
 )
 
 // Policy says how a transport may be used (spec 4.1).
@@ -51,13 +53,15 @@ type Profile struct {
 
 // Transport is one way to connect to the server.
 type Transport struct {
-	Kind    Kind           `json:"kind"`
-	Policy  Policy         `json:"policy"`
-	Label   string         `json:"label,omitempty"`
-	AWG     *AWGConfig     `json:"awg,omitempty"`
-	VLESS   *VLESSConfig   `json:"vless,omitempty"`
-	OpenVPN *OpenVPNConfig `json:"openvpn,omitempty"`
-	Proxy   *ProxyConfig   `json:"proxy,omitempty"`
+	Kind     Kind            `json:"kind"`
+	Policy   Policy          `json:"policy"`
+	Label    string          `json:"label,omitempty"`
+	AWG      *AWGConfig      `json:"awg,omitempty"`
+	VLESS    *VLESSConfig    `json:"vless,omitempty"`
+	OpenVPN  *OpenVPNConfig  `json:"openvpn,omitempty"`
+	Proxy    *ProxyConfig    `json:"proxy,omitempty"`
+	SSH      *SSHConfig      `json:"ssh,omitempty"`
+	Hysteria *HysteriaConfig `json:"hysteria,omitempty"`
 }
 
 // ID returns a stable identifier used to remember the working transport for a
@@ -72,6 +76,10 @@ func (t Transport) ID() string {
 		return string(t.Kind) + ":" + net.JoinHostPort(t.OpenVPN.Host, strconv.Itoa(t.OpenVPN.Port)) + ":" + t.OpenVPN.Proto
 	case t.Proxy != nil:
 		return string(t.Kind) + ":" + net.JoinHostPort(t.Proxy.Address, strconv.Itoa(t.Proxy.Port))
+	case t.SSH != nil:
+		return string(t.Kind) + ":" + net.JoinHostPort(t.SSH.Address, strconv.Itoa(t.SSH.Port))
+	case t.Hysteria != nil:
+		return string(t.Kind) + ":" + net.JoinHostPort(t.Hysteria.Address, strconv.Itoa(t.Hysteria.Port))
 	}
 	return string(t.Kind)
 }
@@ -88,6 +96,10 @@ func (t Transport) ServerHost() string {
 		return t.OpenVPN.Host
 	case t.Proxy != nil:
 		return t.Proxy.Address
+	case t.SSH != nil:
+		return t.SSH.Address
+	case t.Hysteria != nil:
+		return t.Hysteria.Address
 	}
 	return ""
 }
@@ -105,13 +117,17 @@ func (t *Transport) SetServerIP(ip netip.Addr) {
 		t.OpenVPN.Host = ip.String()
 	case t.Proxy != nil:
 		t.Proxy.Address = ip.String()
+	case t.SSH != nil:
+		t.SSH.Address = ip.String()
+	case t.Hysteria != nil:
+		t.Hysteria.Address = ip.String()
 	}
 }
 
 // UDPBased reports whether the transport reaches the server over UDP, so a
 // silent server is a UDP rather than a TCP timeout.
 func (t Transport) UDPBased() bool {
-	return t.AWG != nil || t.OpenVPN != nil && t.OpenVPN.Proto == "udp"
+	return t.AWG != nil || t.Hysteria != nil || t.OpenVPN != nil && t.OpenVPN.Proto == "udp"
 }
 
 // AWGConfig is an AmneziaWG interface with a single peer.
@@ -264,6 +280,16 @@ func (t *Transport) classify() {
 		case ProxyShadowsocks:
 			t.Kind = KindShadowsocks
 		}
+	case t.SSH != nil:
+		t.Kind, t.Policy = KindSSH, PolicyManualOnly
+	case t.Hysteria != nil:
+		// QUIC that looks like HTTP/3 (or random UDP with Salamander), but
+		// UDP is often throttled: a fallback after VLESS and AmneziaWG.
+		// Without certificate checks it is only used when chosen.
+		t.Kind, t.Policy = KindHysteria2, PolicyFallback
+		if !t.Hysteria.Verified() {
+			t.Policy = PolicyManualOnly
+		}
 	}
 }
 
@@ -272,7 +298,7 @@ func (t *Transport) Validate() error {
 	var err error
 	switch {
 	case t.engines() != 1:
-		return invalid("transport must have exactly one of awg, vless, openvpn or proxy")
+		return invalid("transport must have exactly one of awg, vless, openvpn, proxy, ssh or hysteria")
 	case t.AWG != nil:
 		err = t.AWG.validate()
 	case t.VLESS != nil:
@@ -281,6 +307,10 @@ func (t *Transport) Validate() error {
 		err = t.OpenVPN.validate()
 	case t.Proxy != nil:
 		err = t.Proxy.validate()
+	case t.SSH != nil:
+		err = t.SSH.validate()
+	case t.Hysteria != nil:
+		err = t.Hysteria.validate()
 	}
 	if err != nil {
 		return err
@@ -291,7 +321,7 @@ func (t *Transport) Validate() error {
 
 func (t *Transport) engines() int {
 	n := 0
-	for _, set := range []bool{t.AWG != nil, t.VLESS != nil, t.OpenVPN != nil, t.Proxy != nil} {
+	for _, set := range []bool{t.AWG != nil, t.VLESS != nil, t.OpenVPN != nil, t.Proxy != nil, t.SSH != nil, t.Hysteria != nil} {
 		if set {
 			n++
 		}

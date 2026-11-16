@@ -81,11 +81,11 @@ func Start(pio netstack.PacketIO, cfg Config, deps Deps) (*Tunnel, error) {
 	if _, err := fallback.NewPlanner(cfg.Profile, cfg.Policy, fallback.Options{Manual: cfg.ManualTransport}); err != nil {
 		return nil, errclass.Wrap(errclass.Config, err)
 	}
-	if deps.Starter == nil {
-		deps.Starter = DefaultStarter(deps.Logf)
-	}
 	if deps.Memory == nil {
 		deps.Memory = fallback.NewMemory(nil)
+	}
+	if deps.Starter == nil {
+		deps.Starter = NewStarter(deps.Logf, deps.Memory)
 	}
 	redactor := profile.NewRedactor(cfg.Profile.Secrets())
 	t := &Tunnel{
