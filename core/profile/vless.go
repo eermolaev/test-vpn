@@ -22,32 +22,12 @@ func ParseVLESSURL(s string) (*Transport, string, error) {
 		return nil, "", invalid("vless: bad port")
 	}
 	q := u.Query()
-	c := &VLESSConfig{
-		Address:       u.Hostname(),
-		Port:          port,
-		UUID:          u.User.Username(),
-		Flow:          q.Get("flow"),
-		Security:      q.Get("security"),
-		Network:       q.Get("type"),
-		SNI:           q.Get("sni"),
-		Fingerprint:   q.Get("fp"),
-		PublicKey:     q.Get("pbk"),
-		ShortID:       q.Get("sid"),
-		SpiderX:       q.Get("spx"),
-		Mldsa65Verify: q.Get("pqv"),
-		Path:          q.Get("path"),
-		Host:          q.Get("host"),
-		Mode:          q.Get("mode"),
-		ServiceName:   q.Get("serviceName"),
-	}
-	if a := q.Get("alpn"); a != "" {
-		c.ALPN = splitList(a)
+	c := &VLESSConfig{Address: u.Hostname(), Port: port, UUID: u.User.Username(), Flow: q.Get("flow")}
+	if err := c.streamFromQuery(q); err != nil {
+		return nil, "", err
 	}
 	if e := q.Get("encryption"); e != "" && e != "none" {
 		return nil, "", unsupported("vless: encryption %q", e)
-	}
-	if hdr := q.Get("headerType"); hdr != "" && hdr != "none" {
-		return nil, "", unsupported("vless: headerType %q", hdr)
 	}
 	t := &Transport{VLESS: c}
 	if err := t.Validate(); err != nil {
@@ -56,6 +36,29 @@ func ParseVLESSURL(s string) (*Transport, string, error) {
 	name, _ := url.PathUnescape(u.Fragment)
 	t.Label = name
 	return t, name, nil
+}
+
+// streamFromQuery reads the stream settings of a vless:// or trojan:// link.
+func (c *VLESSConfig) streamFromQuery(q url.Values) error {
+	c.Security = q.Get("security")
+	c.Network = q.Get("type")
+	c.SNI = q.Get("sni")
+	c.Fingerprint = q.Get("fp")
+	c.PublicKey = q.Get("pbk")
+	c.ShortID = q.Get("sid")
+	c.SpiderX = q.Get("spx")
+	c.Mldsa65Verify = q.Get("pqv")
+	c.Path = q.Get("path")
+	c.Host = q.Get("host")
+	c.Mode = q.Get("mode")
+	c.ServiceName = q.Get("serviceName")
+	if a := q.Get("alpn"); a != "" {
+		c.ALPN = splitList(a)
+	}
+	if hdr := q.Get("headerType"); hdr != "" && hdr != "none" {
+		return unsupported("%s: headerType %q", c.Proto(), hdr)
+	}
+	return nil
 }
 
 // FormatVLESSURL renders the transport as a share link.

@@ -53,6 +53,9 @@ func Diagnose(ctx context.Context, c *profile.VLESSConfig, dns netip.AddrPort) e
 	stop := context.AfterFunc(ctx, func() { raw.SetDeadline(time.Now()) })
 	defer stop()
 
+	if c.Security == "none" { // VMess over bare TCP: nothing more to check alone
+		return errclass.Wrap(errclass.ServerSilent, fmt.Errorf("TCP %s; nothing passes through the %s server: the user ID or cipher may be wrong", ms(tcpTime), c.Proto()))
+	}
 	start = time.Now()
 	sec, err := handshake(ctx, raw, c)
 	if err != nil {
@@ -62,6 +65,9 @@ func Diagnose(ctx context.Context, c *profile.VLESSConfig, dns netip.AddrPort) e
 	ok := fmt.Sprintf("TCP %s, %s handshake %s", ms(tcpTime), handshakeName(c), ms(hsTime))
 	if c.Network != "raw" && c.Network != "tcp" && c.Network != "" {
 		return errclass.Wrap(errclass.Routing, fmt.Errorf("%s; the %s transport over it was not checked", ok, c.Network))
+	}
+	if p := c.Proto(); p != "vless" {
+		return errclass.Wrap(errclass.Routing, fmt.Errorf("%s; the %s request was not checked: the user ID or password may be wrong", ok, p))
 	}
 
 	start = time.Now()

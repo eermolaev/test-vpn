@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -535,5 +536,41 @@ func TestDaemonHysteria(t *testing.T) {
 	cl := <-e.client
 	if got := exchange(t, cl, echo.TCP, []byte("hi")); got != "echo:hi" {
 		t.Fatalf("hysteria flow: %q", got)
+	}
+}
+
+func TestDaemonVMessTrojan(t *testing.T) {
+	host := testenv.HostIP(t)
+	echo := testenv.StartEchoOn(t, host, "echo:")
+	dns := testenv.StartDNSOn(t, host, [4]byte{1, 2, 3, 4})
+	srv := testenv.StartReality(t)
+	tj, vm := srv.Trojan, srv.VMessWS
+	vmJSON := fmt.Sprintf(`{"v":"2","ps":"VM","add":"%s","port":"%d","id":"%s","aid":"0","scy":"auto","net":"ws","path":"%s","tls":""}`, vm.Address, vm.Port, vm.UUID, vm.Path)
+	for _, c := range []struct {
+		link string
+		kind profile.Kind
+	}{
+		{fmt.Sprintf("trojan://%s@%s:%d?security=reality&sni=%s&pbk=%s&sid=%s&fp=chrome#TJ", tj.Password, tj.Address, tj.Port, tj.SNI, tj.PublicKey, tj.ShortID), profile.KindTrojan},
+		{"vmess://" + base64.StdEncoding.EncodeToString([]byte(vmJSON)), profile.KindVMess},
+	} {
+		e := startDaemonOpts(t, t.TempDir(), nil, nil, nil)
+		var pe ProfileEntry
+		if err := e.cl.Call(CmdImport, ImportArgs{Text: c.link}, &pe); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.cl.Call(CmdSetSettings, Settings{DNSServers: []string{dns.String()}}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.cl.Call(CmdConnect, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		st := e.waitConnected(t)
+		if st.Tunnel.TransportKind != string(c.kind) {
+			t.Fatalf("transport %q, want %s", st.Tunnel.TransportKind, c.kind)
+		}
+		cl := <-e.client
+		if got := exchange(t, cl, echo.TCP, []byte("hi")); got != "echo:hi" {
+			t.Fatalf("%s flow: %q", c.kind, got)
+		}
 	}
 }

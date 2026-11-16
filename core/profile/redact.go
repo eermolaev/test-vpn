@@ -25,7 +25,7 @@ func (p *Profile) Secrets() []string {
 			}
 		}
 		if c := t.VLESS; c != nil {
-			add(c.UUID, c.PublicKey, c.ShortID, c.Address, c.Path)
+			add(c.UUID, c.Password, c.PublicKey, c.ShortID, c.Address, c.Path)
 		}
 		if c := t.OpenVPN; c != nil {
 			add(c.Host)
@@ -86,6 +86,9 @@ func (p *Profile) Summarize() Summary {
 			ts.Detail = v.Network
 			if v.Flow != "" {
 				ts.Detail += "+vision"
+			}
+			if v.Proto() != "vless" {
+				ts.Detail += "+" + v.Security
 			}
 		}
 		if t.AWG != nil {

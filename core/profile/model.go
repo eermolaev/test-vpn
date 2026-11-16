@@ -27,6 +27,8 @@ const (
 	KindShadowsocks  Kind = "shadowsocks"
 	KindSSH          Kind = "ssh"
 	KindHysteria2    Kind = "hysteria2"
+	KindVMess        Kind = "vmess"
+	KindTrojan       Kind = "trojan"
 )
 
 // Policy says how a transport may be used (spec 4.1).
@@ -199,14 +201,19 @@ func (c *AWGConfig) Obfuscated() bool {
 	return false
 }
 
-// VLESSConfig is a VLESS outbound.
+// VLESSConfig is an xray outbound with a TLS/REALITY stream: VLESS, or
+// VMess or Trojan, which share the stream settings.
 type VLESSConfig struct {
+	// Protocol is "vless" (or empty), "vmess" or "trojan".
+	Protocol string `json:"protocol,omitempty"`
 	Address  string `json:"address"`
 	Port     int    `json:"port"`
-	UUID     string `json:"uuid"`
-	Flow     string `json:"flow,omitempty"` // xtls-rprx-vision
-	Security string `json:"security"`       // reality | tls | none
-	Network  string `json:"network"`        // raw | xhttp | grpc | ws
+	UUID     string `json:"uuid,omitempty"`     // VLESS and VMess user ID
+	Password string `json:"password,omitempty"` // Trojan
+	Cipher   string `json:"cipher,omitempty"`   // VMess: auto, aes-128-gcm, chacha20-poly1305
+	Flow     string `json:"flow,omitempty"`     // xtls-rprx-vision (VLESS only)
+	Security string `json:"security"`           // reality | tls | none
+	Network  string `json:"network"`            // raw | xhttp | grpc | ws
 	// TLS / REALITY.
 	SNI         string   `json:"sni,omitempty"`
 	Fingerprint string   `json:"fingerprint,omitempty"`
@@ -251,6 +258,16 @@ func (t *Transport) classify() {
 			t.Kind, t.Policy = KindAmneziaWG, PolicyPrimary
 		} else {
 			t.Kind, t.Policy = KindWireGuard, PolicyManualOnly
+		}
+	case t.VLESS != nil && t.VLESS.Proto() != "vless":
+		// VMess and Trojan: over REALITY as strong as VLESS without
+		// Vision; over TLS or bare VMess easy to probe, so only when chosen.
+		t.Kind, t.Policy = KindVMess, PolicyManualOnly
+		if t.VLESS.Proto() == "trojan" {
+			t.Kind = KindTrojan
+		}
+		if t.VLESS.Security == "reality" {
+			t.Policy = PolicyFallback
 		}
 	case t.VLESS != nil:
 		switch t.VLESS.Security {
@@ -435,15 +452,57 @@ func validMagicHeader(h string) bool {
 	return len(vals) == 1 || vals[0] <= vals[1]
 }
 
+// Proto returns the protocol name: vless, vmess or trojan.
+func (c *VLESSConfig) Proto() string {
+	if c.Protocol == "" {
+		return "vless"
+	}
+	return c.Protocol
+}
+
 func (c *VLESSConfig) validate() error {
+	if c.Protocol == "vless" {
+		c.Protocol = ""
+	}
+	p := c.Proto()
 	if c.Address == "" {
-		return invalid("vless: empty address")
+		return invalid("%s: empty address", p)
 	}
 	if c.Port <= 0 || c.Port > 65535 {
-		return invalid("vless: bad port %d", c.Port)
+		return invalid("%s: bad port %d", p, c.Port)
 	}
-	if !isUUID(c.UUID) {
-		return invalid("vless: bad uuid")
+	switch p {
+	case "vless":
+		if !isUUID(c.UUID) {
+			return invalid("vless: bad uuid")
+		}
+	case "vmess":
+		if !isUUID(c.UUID) {
+			return invalid("vmess: bad user id")
+		}
+		switch c.Cipher {
+		case "":
+			c.Cipher = "auto"
+		case "auto", "aes-128-gcm", "chacha20-poly1305":
+		case "none", "zero":
+			if c.Security == "" || c.Security == "none" {
+				return invalid("vmess: cipher %q without TLS sends traffic in the clear", c.Cipher)
+			}
+		default:
+			return unsupported("vmess: cipher %q", c.Cipher)
+		}
+	case "trojan":
+		if c.Password == "" {
+			return invalid("trojan: empty password")
+		}
+		if c.Security == "" || c.Security == "none" {
+			return invalid("trojan: needs TLS or REALITY")
+		}
+	default:
+		return unsupported("protocol %q", c.Protocol)
+	}
+	if c.Flow != "" && p != "vless" {
+		return unsupported("%s: flow %q", p, c.Flow)
 	}
 	switch c.Network {
 	case "", "tcp", "raw":
@@ -452,17 +511,17 @@ func (c *VLESSConfig) validate() error {
 		c.Network = "xhttp"
 	case "grpc", "ws":
 	default:
-		return unsupported("vless: network %q", c.Network)
+		return unsupported("%s: network %q", p, c.Network)
 	}
 	switch c.Flow {
 	case "", "xtls-rprx-vision":
 	case "xtls-rprx-vision-udp443":
 		c.Flow = "xtls-rprx-vision"
 	default:
-		return unsupported("vless: flow %q", c.Flow)
+		return unsupported("%s: flow %q", p, c.Flow)
 	}
 	if c.Flow != "" && c.Network != "raw" {
-		return invalid("vless: flow %s requires raw/tcp transport", c.Flow)
+		return invalid("%s: flow %s requires raw/tcp transport", p, c.Flow)
 	}
 	if c.Security == "" {
 		c.Security = "none"
@@ -470,13 +529,13 @@ func (c *VLESSConfig) validate() error {
 	switch c.Security {
 	case "reality":
 		if c.PublicKey == "" {
-			return invalid("vless: reality public key is missing")
+			return invalid("%s: reality public key is missing", p)
 		}
 		if c.SNI == "" {
-			return invalid("vless: reality server name is missing")
+			return invalid("%s: reality server name is missing", p)
 		}
 		if len(c.ShortID) > 16 || len(c.ShortID)%2 != 0 || !isHex(c.ShortID) {
-			return invalid("vless: bad reality shortId")
+			return invalid("%s: bad reality shortId", p)
 		}
 		if c.Fingerprint == "" {
 			c.Fingerprint = DefaultFingerprint
@@ -487,7 +546,7 @@ func (c *VLESSConfig) validate() error {
 		}
 	case "none":
 	default:
-		return unsupported("vless: security %q", c.Security)
+		return unsupported("%s: security %q", p, c.Security)
 	}
 	return nil
 }

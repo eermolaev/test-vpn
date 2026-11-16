@@ -15,18 +15,25 @@ import (
 	_ "github.com/xtls/xray-core/app/proxyman/inbound"
 	_ "github.com/xtls/xray-core/app/proxyman/outbound"
 	_ "github.com/xtls/xray-core/proxy/freedom"
+	_ "github.com/xtls/xray-core/proxy/trojan"
 	_ "github.com/xtls/xray-core/proxy/vless/inbound"
+	_ "github.com/xtls/xray-core/proxy/vmess/inbound"
 	_ "github.com/xtls/xray-core/transport/internet/reality"
 	_ "github.com/xtls/xray-core/transport/internet/splithttp"
 	_ "github.com/xtls/xray-core/transport/internet/tcp"
+	_ "github.com/xtls/xray-core/transport/internet/websocket"
 )
 
-// RealityServer is an in-process VLESS + REALITY server with two inbounds:
-// RAW + Vision and XHTTP. Its freedom outbound reaches loopback services.
+// RealityServer is an in-process xray server with VLESS + REALITY inbounds
+// (RAW + Vision and XHTTP), Trojan + REALITY, and VMess over bare TCP and
+// WebSocket. Its freedom outbound reaches loopback services.
 type RealityServer struct {
-	Vision *profile.VLESSConfig
-	XHTTP  *profile.VLESSConfig
-	inst   *core.Instance
+	Vision  *profile.VLESSConfig
+	XHTTP   *profile.VLESSConfig
+	Trojan  *profile.VLESSConfig
+	VMess   *profile.VLESSConfig
+	VMessWS *profile.VLESSConfig
+	inst    *core.Instance
 }
 
 const realitySNI = "reality.test"
@@ -49,6 +56,7 @@ func StartReality(t testing.TB) *RealityServer {
 	uuid := "b831381d-6324-4d53-ad4f-8cda48b30811"
 	sid := hex.EncodeToString([]byte{0xab, 0xcd, 0xef, 0x01})
 	visionPort, xhttpPort := freePort(t), freePort(t)
+	trojanPort, vmessPort, vmessWSPort := freePort(t), freePort(t), freePort(t)
 	reality := map[string]any{
 		"target":      site.String(),
 		"serverNames": []string{realitySNI},
@@ -77,6 +85,20 @@ func StartReality(t testing.TB) *RealityServer {
 		"inbounds": []any{
 			inbound(visionPort, "raw", "xtls-rprx-vision", nil),
 			inbound(xhttpPort, "xhttp", "", map[string]any{"xhttpSettings": map[string]any{"path": "/x"}}),
+			map[string]any{
+				"listen": "127.0.0.1", "port": trojanPort, "protocol": "trojan",
+				"settings":       map[string]any{"clients": []any{map[string]any{"password": "trojan-pw"}}},
+				"streamSettings": map[string]any{"network": "raw", "security": "reality", "realitySettings": reality},
+			},
+			map[string]any{
+				"listen": "127.0.0.1", "port": vmessPort, "protocol": "vmess",
+				"settings": map[string]any{"clients": []any{map[string]any{"id": uuid}}},
+			},
+			map[string]any{
+				"listen": "127.0.0.1", "port": vmessWSPort, "protocol": "vmess",
+				"settings":       map[string]any{"clients": []any{map[string]any{"id": uuid}}},
+				"streamSettings": map[string]any{"network": "ws", "wsSettings": map[string]any{"path": "/vm"}},
+			},
 		},
 		"outbounds": []any{map[string]any{"protocol": "freedom"}},
 	}
@@ -104,7 +126,12 @@ func StartReality(t testing.TB) *RealityServer {
 	vision, xh := base, base
 	vision.Port, vision.Network, vision.Flow = visionPort, "raw", "xtls-rprx-vision"
 	xh.Port, xh.Network, xh.Path = xhttpPort, "xhttp", "/x"
-	return &RealityServer{Vision: &vision, XHTTP: &xh, inst: inst}
+	trojan := base
+	trojan.Protocol, trojan.UUID, trojan.Password, trojan.Port, trojan.Network = "trojan", "", "trojan-pw", trojanPort, "raw"
+	vm := profile.VLESSConfig{Protocol: "vmess", Address: "127.0.0.1", Port: vmessPort, UUID: uuid, Cipher: "auto", Network: "raw", Security: "none"}
+	vmws := vm
+	vmws.Port, vmws.Network, vmws.Path = vmessWSPort, "ws", "/vm"
+	return &RealityServer{Vision: &vision, XHTTP: &xh, Trojan: &trojan, VMess: &vm, VMessWS: &vmws, inst: inst}
 }
 
 // Vision2ID returns the transport ID of the Vision inbound.

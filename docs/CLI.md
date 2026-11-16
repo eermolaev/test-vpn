@@ -96,6 +96,7 @@ stays blocked during the swap and reconnects by itself.
 | Format | Transport | Used automatically |
 |---|---|---|
 | `vless://…` links, xray JSON, Amnezia `vpn://` keys | VLESS + REALITY / TLS | REALITY yes, TLS only when pinned |
+| `trojan://…`, `vmess://…` (v2rayN), xray JSON | Trojan, VMess (AEAD) over REALITY, TLS or, for VMess, bare TCP; raw, ws, gRPC, xhttp | over REALITY yes, otherwise only when chosen |
 | AmneziaWG `.conf` | AmneziaWG | yes |
 | WireGuard `.conf` (no obfuscation) | WireGuard | only if the profile has nothing stronger |
 | `.ovpn` | OpenVPN (UDP or TCP) | only if the profile has nothing stronger |

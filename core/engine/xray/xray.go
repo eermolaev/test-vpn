@@ -28,7 +28,9 @@ import (
 	_ "github.com/xtls/xray-core/proxy/shadowsocks"
 	_ "github.com/xtls/xray-core/proxy/shadowsocks_2022"
 	_ "github.com/xtls/xray-core/proxy/socks"
+	_ "github.com/xtls/xray-core/proxy/trojan"
 	_ "github.com/xtls/xray-core/proxy/vless/outbound"
+	_ "github.com/xtls/xray-core/proxy/vmess/outbound"
 	_ "github.com/xtls/xray-core/transport/internet/grpc"
 	_ "github.com/xtls/xray-core/transport/internet/reality"
 	_ "github.com/xtls/xray-core/transport/internet/splithttp"
@@ -50,12 +52,9 @@ type Engine struct {
 	once   sync.Once
 }
 
-// BuildConfig renders the xray JSON config for a VLESS transport.
+// BuildConfig renders the xray JSON config for a VLESS, VMess or Trojan
+// transport.
 func BuildConfig(c *profile.VLESSConfig) ([]byte, error) {
-	user := map[string]any{"id": c.UUID, "encryption": "none"}
-	if c.Flow != "" {
-		user["flow"] = c.Flow
-	}
 	stream := map[string]any{"network": c.Network, "security": c.Security}
 	switch c.Security {
 	case "reality":
@@ -77,7 +76,11 @@ func BuildConfig(c *profile.VLESSConfig) ([]byte, error) {
 		}
 		stream["tlsSettings"] = t
 	case "none":
-		return nil, errclass.Wrap(errclass.Config, fmt.Errorf("xray: VLESS without TLS/REALITY is forbidden"))
+		// VMess encrypts by itself; VLESS and Trojan would send the
+		// traffic and credentials in the clear.
+		if c.Proto() != "vmess" {
+			return nil, errclass.Wrap(errclass.Config, fmt.Errorf("xray: %s without TLS/REALITY is forbidden", c.Proto()))
+		}
 	}
 	switch c.Network {
 	case "xhttp":
@@ -99,14 +102,30 @@ func BuildConfig(c *profile.VLESSConfig) ([]byte, error) {
 		stream["sockopt"] = map[string]any{"dialerProxy": "fragment"}
 		extra = append(extra, Fragments[c.Fragment].outbound("fragment"))
 	}
+	var settings map[string]any
+	switch c.Proto() {
+	case "trojan":
+		settings = map[string]any{"servers": []any{map[string]any{
+			"address": c.Address, "port": c.Port, "password": c.Password,
+		}}}
+	default:
+		user := map[string]any{"id": c.UUID}
+		if c.Proto() == "vmess" {
+			user["security"] = c.Cipher
+		} else {
+			user["encryption"] = "none"
+			if c.Flow != "" {
+				user["flow"] = c.Flow
+			}
+		}
+		settings = map[string]any{"vnext": []any{map[string]any{
+			"address": c.Address, "port": c.Port, "users": []any{user},
+		}}}
+	}
 	return withOutbound(map[string]any{
-		"tag":      "proxy",
-		"protocol": "vless",
-		"settings": map[string]any{"vnext": []any{map[string]any{
-			"address": c.Address,
-			"port":    c.Port,
-			"users":   []any{user},
-		}}},
+		"tag":            "proxy",
+		"protocol":       c.Proto(),
+		"settings":       settings,
 		"streamSettings": stream,
 	}, extra...)
 }
@@ -157,7 +176,12 @@ func Start(c *profile.VLESSConfig, logf func(string)) (*Engine, error) {
 		return nil, err
 	}
 	name := profile.KindVLESSReality
-	if c.Security == "tls" {
+	switch {
+	case c.Proto() == "vmess":
+		name = profile.KindVMess
+	case c.Proto() == "trojan":
+		name = profile.KindTrojan
+	case c.Security == "tls":
 		name = profile.KindVLESSTLS
 	}
 	e, err := start(js, name, logf)

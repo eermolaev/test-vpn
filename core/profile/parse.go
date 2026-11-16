@@ -7,7 +7,7 @@ import (
 
 // Parse detects the format of input (pasted text, file contents or a decoded
 // QR code) and parses it. Several links (vless://, ss://, socks5://, http://,
-// ssh://, hysteria2://) separated by newlines become one profile with several transports.
+// vmess://, trojan://, ssh://, hysteria2://) separated by newlines become one profile with several transports.
 func Parse(input string) (*Profile, error) {
 	s := strings.TrimSpace(strings.TrimPrefix(input, "\xef\xbb\xbf"))
 	switch {
@@ -15,7 +15,7 @@ func Parse(input string) (*Profile, error) {
 		return nil, invalid("empty input")
 	case hasPrefixFold(s, amneziaScheme):
 		return ParseAmneziaKey(s)
-	case hasPrefixFold(s, "vless://") || hasPrefixFold(s, "ssh://") || isHysteriaLink(s) || isProxyLink(s):
+	case hasPrefixFold(s, "vless://") || hasPrefixFold(s, "vmess://") || hasPrefixFold(s, "trojan://") || hasPrefixFold(s, "ssh://") || isHysteriaLink(s) || isProxyLink(s):
 		p := &Profile{}
 		for _, line := range strings.Split(s, "\n") {
 			line = strings.TrimSpace(line)
@@ -28,6 +28,10 @@ func Parse(input string) (*Profile, error) {
 			switch {
 			case hasPrefixFold(line, "vless://"):
 				t, name, err = ParseVLESSURL(line)
+			case hasPrefixFold(line, "vmess://"):
+				t, name, err = ParseVMessURL(line)
+			case hasPrefixFold(line, "trojan://"):
+				t, name, err = ParseTrojanURL(line)
 			case hasPrefixFold(line, "ssh://"):
 				t, name, err = ParseSSHURL(line)
 			case isHysteriaLink(line):

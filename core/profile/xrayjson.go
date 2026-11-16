@@ -18,9 +18,12 @@ type xrayOutbound struct {
 }
 
 type xrayUser struct {
-	ID         string `json:"id"`
-	Flow       string `json:"flow"`
-	Encryption string `json:"encryption"`
+	ID         string  `json:"id"`
+	Flow       string  `json:"flow"`
+	Encryption string  `json:"encryption"`
+	Security   string  `json:"security"` // VMess cipher
+	AlterID    flexInt `json:"alterId"`  // VMess, must be 0
+	Password   string  `json:"password"` // Trojan
 }
 
 type xrayVLESSSettings struct {
@@ -29,6 +32,13 @@ type xrayVLESSSettings struct {
 		Port    flexInt    `json:"port"`
 		Users   []xrayUser `json:"users"`
 	} `json:"vnext"`
+	// Trojan servers.
+	Servers []struct {
+		Address  string  `json:"address"`
+		Port     flexInt `json:"port"`
+		Password string  `json:"password"`
+		Flow     string  `json:"flow"`
+	} `json:"servers"`
 	// Simplified single-server form.
 	Address string  `json:"address"`
 	Port    flexInt `json:"port"`
@@ -90,7 +100,7 @@ func (f *flexInt) UnmarshalJSON(b []byte) error {
 	return err
 }
 
-// ParseXrayJSON extracts all VLESS outbounds from an xray client config. Other
+// ParseXrayJSON extracts all VLESS, VMess and Trojan outbounds from an xray client config. Other
 // outbounds (freedom, blackhole, dns, ...) are ignored: routing is done by the
 // app, not by the imported config.
 func ParseXrayJSON(data []byte) (*Profile, error) {
@@ -102,7 +112,7 @@ func ParseXrayJSON(data []byte) (*Profile, error) {
 	var other []string
 	for _, ob := range cfg.Outbounds {
 		switch ob.Protocol {
-		case "vless":
+		case "vless", "vmess", "trojan":
 		case "freedom", "blackhole", "dns", "loopback":
 			continue
 		default:
@@ -117,9 +127,9 @@ func ParseXrayJSON(data []byte) (*Profile, error) {
 	}
 	if len(p.Transports) == 0 {
 		if len(other) > 0 {
-			return nil, unsupported("xray json: no vless outbounds (found %v)", other)
+			return nil, unsupported("xray json: no vless, vmess or trojan outbounds (found %v)", other)
 		}
-		return nil, invalid("xray json: no vless outbounds")
+		return nil, invalid("xray json: no vless, vmess or trojan outbounds")
 	}
 	return p, p.Validate()
 }
@@ -127,25 +137,39 @@ func ParseXrayJSON(data []byte) (*Profile, error) {
 func xrayOutboundToTransport(ob xrayOutbound) (*Transport, error) {
 	var s xrayVLESSSettings
 	if err := json.Unmarshal(ob.Settings, &s); err != nil {
-		return nil, invalid("xray json: vless settings: %v", err)
+		return nil, invalid("xray json: %s settings: %v", ob.Protocol, err)
 	}
-	c := &VLESSConfig{}
+	c := &VLESSConfig{Protocol: ob.Protocol}
+	user := s.xrayUser
 	switch {
+	case len(s.Servers) > 0:
+		if len(s.Servers) > 1 {
+			return nil, unsupported("xray json: multiple servers in one outbound")
+		}
+		v := s.Servers[0]
+		c.Address, c.Port = v.Address, int(v.Port)
+		user = xrayUser{Password: v.Password, Flow: v.Flow}
 	case len(s.Vnext) > 0:
 		if len(s.Vnext) > 1 || len(s.Vnext[0].Users) != 1 {
 			return nil, unsupported("xray json: multiple servers or users in one outbound")
 		}
 		v := s.Vnext[0]
 		c.Address, c.Port = v.Address, int(v.Port)
-		c.UUID, c.Flow = v.Users[0].ID, v.Users[0].Flow
-		if e := v.Users[0].Encryption; e != "" && e != "none" {
-			return nil, unsupported("xray json: vless encryption %q", e)
-		}
+		user = v.Users[0]
 	default:
-		c.Address, c.Port, c.UUID, c.Flow = s.Address, int(s.Port), s.ID, s.Flow
-		if e := s.Encryption; e != "" && e != "none" {
+		c.Address, c.Port = s.Address, int(s.Port)
+	}
+	c.UUID, c.Flow, c.Password = user.ID, user.Flow, user.Password
+	switch ob.Protocol {
+	case "vless":
+		if e := user.Encryption; e != "" && e != "none" {
 			return nil, unsupported("xray json: vless encryption %q", e)
 		}
+	case "vmess":
+		if user.AlterID != 0 {
+			return nil, unsupported("xray json: vmess alterId %d (only AEAD, alterId 0, is supported)", user.AlterID)
+		}
+		c.Cipher = user.Security
 	}
 	if st := ob.StreamSettings; st != nil {
 		c.Network, c.Security = st.Network, st.Security
