@@ -29,6 +29,8 @@ func TestNftRules(t *testing.T) {
 		"ip daddr @direct accept",
 		"ip daddr 192.168.1.0/24 accept",
 		"ip daddr { 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255 } accept",
+		`oifname "docker0" accept`,
+		`oifname "br-*" accept`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rules miss %q:\n%s", want, got)
@@ -44,6 +46,10 @@ func TestNftRules(t *testing.T) {
 	min := NftRules(KillSwitch{})
 	if strings.Contains(min, "oifname \"\"") || strings.Contains(min, "192.168") || strings.Contains(min, "169.254") {
 		t.Errorf("unexpected rules without tunnel and LAN:\n%s", min)
+	}
+	// Container bridges are host-local and allowed without AllowLAN.
+	if !strings.Contains(min, `oifname "docker0" accept`) || !strings.Contains(min, `oifname "veth*" accept`) {
+		t.Errorf("container bridges must be allowed without AllowLAN:\n%s", min)
 	}
 	if !strings.Contains(min, "set servers { type ipv4_addr; }") {
 		t.Errorf("empty server set must be declared:\n%s", min)

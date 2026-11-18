@@ -249,6 +249,9 @@ a failed tunnel is retried every 30 seconds.
   IPv6 link-local/multicast may leave the computer.
   - macOS: pf anchor `com.apple/250.TestVPN`.
   - Linux: nftables table `inet testvpn` (an `output` chain ending in `drop`).
+    Local container bridges (`docker0`, `br-*`, `veth*`, `cni*`, `podman*`,
+    `virbr*`) are always allowed, so containers keep reaching host services
+    (e.g. Open WebUI → Ollama); their own internet traffic goes into the tunnel.
   - Windows: Windows Filtering Platform filters that permit the `TestVPN`
     adapter, loopback, DHCP, neighbor discovery and the service itself (it
     makes the server and excluded-domain connections); everything else is

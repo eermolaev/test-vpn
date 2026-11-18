@@ -21,9 +21,9 @@ const LinuxTunPrefix = "testvpn"
 // NftRules renders an nft script that atomically replaces the kill switch
 // table. It mirrors PFRules: everything leaving the machine is dropped except
 // the tunnel, loopback, DHCP, IPv6 link-local and multicast, the VPN servers,
-// addresses of excluded domains (@direct, filled at runtime) and optionally
-// the local network. Replacing the table empties @direct, so the caller
-// re-adds known addresses.
+// addresses of excluded domains (@direct, filled at runtime), local container
+// bridges and optionally the local network. Replacing the table empties
+// @direct, so the caller re-adds known addresses.
 func NftRules(k KillSwitch) string {
 	var b strings.Builder
 	w := func(format string, a ...any) { fmt.Fprintf(&b, format+"\n", a...) }
@@ -64,11 +64,22 @@ func NftRules(k KillSwitch) string {
 		}
 		w("\t\tip daddr { 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255 } accept")
 	}
+	// Local container bridges (Docker, Podman, libvirt) never leave the host,
+	// so they are allowed even without AllowLAN; otherwise replies from host
+	// services to containers are dropped while the VPN is connected. Traffic
+	// the containers send to the internet is routed into the tunnel.
+	for _, ifc := range localBridgeIfnames {
+		w("\t\toifname %q accept", ifc)
+	}
 	w("\t\tdrop")
 	w("\t}")
 	w("}")
 	return b.String()
 }
+
+// localBridgeIfnames are host-local bridge interfaces that are always allowed
+// (nft matches a trailing * as a prefix wildcard).
+var localBridgeIfnames = []string{"docker0", "br-*", "veth*", "cni*", "podman*", "virbr*"}
 
 // NftAddDirect returns the nft arguments that add ips to @direct.
 func NftAddDirect(ips []netip.Addr) []string {
