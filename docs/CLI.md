@@ -191,7 +191,7 @@ log (TCP, handshake, a DNS query through the server).
 | Key | Action |
 | --- | --- |
 | `c` | connect / disconnect |
-| `r` | re-check the tunnel now |
+| `r` | reconnect: restart the tunnel with the stored profile and settings (applies a newly pinned transport; the kill switch stays on) |
 | `p` | profiles: `i` import (paste, or `@~/path/file.conf`), `a` add transports to the selected profile, `enter` select, `t` pin a transport, `n` rename, `g` expected country, `d` delete |
 | `e` | exclusions: domains, IPv4 addresses (`31.172.77.119`) and subnets (`31.172.77.0/24`); `ctrl+s` saves |
 | `v` | VPN list: which sites use the VPN (see [Which traffic uses the VPN](#which-traffic-uses-the-vpn)) |

@@ -49,7 +49,7 @@ func (helpDialog) Update(m *Model, msg tea.Msg) (bool, tea.Cmd) {
 func (helpDialog) View(m *Model, w, h int) string {
 	rows := [][2]string{
 		{"c", "connect / disconnect"},
-		{"r", "re-check the tunnel now"},
+		{"r", "reconnect (re-reads the profile and settings)"},
 		{"p", "profiles: import, select, pin transport, expected country"},
 		{"e", "exclusions: domains, IPv4 addresses and subnets (bypass the VPN)"},
 		{"v", "VPN list: * = everything, or only the listed sites use the VPN"},

@@ -574,3 +574,56 @@ func TestDaemonVMessTrojan(t *testing.T) {
 		}
 	}
 }
+
+// TestReconnectAppliesPin checks that reconnect starts over with the stored
+// profile: a transport pinned while connected is used right away.
+func TestReconnectAppliesPin(t *testing.T) {
+	host := testenv.HostIP(t)
+	echo := testenv.StartEchoOn(t, host, "echo:")
+	dns := testenv.StartDNSOn(t, host, [4]byte{1, 2, 3, 4})
+	srv := testenv.StartReality(t)
+	tj, vm := srv.Trojan, srv.VMessWS
+	vmJSON := fmt.Sprintf(`{"v":"2","ps":"VM","add":"%s","port":"%d","id":"%s","aid":"0","scy":"auto","net":"ws","path":"%s","tls":""}`, vm.Address, vm.Port, vm.UUID, vm.Path)
+	links := fmt.Sprintf("trojan://%s@%s:%d?security=reality&sni=%s&pbk=%s&sid=%s&fp=chrome#TJ\n", tj.Password, tj.Address, tj.Port, tj.SNI, tj.PublicKey, tj.ShortID) +
+		"vmess://" + base64.StdEncoding.EncodeToString([]byte(vmJSON))
+
+	e := startDaemonOpts(t, t.TempDir(), nil, nil, nil)
+	var pe ProfileEntry
+	if err := e.cl.Call(CmdImport, ImportArgs{Text: links}, &pe); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdSetSettings, Settings{DNSServers: []string{dns.String()}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdConnect, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if st := e.waitConnected(t); st.Tunnel.TransportKind != string(profile.KindTrojan) {
+		t.Fatalf("first transport %q", st.Tunnel.TransportKind)
+	}
+	<-e.client
+
+	var vmID string
+	for _, tr := range pe.Summary.Transports {
+		if tr.Kind == profile.KindVMess {
+			vmID = tr.ID
+		}
+	}
+	if err := e.cl.Call(CmdUpdateProfile, UpdateProfile{ID: pe.ID, ManualTransport: &vmID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cl.Call(CmdReconnect, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := e.waitConnected(t)
+	if st.Tunnel.TransportKind != string(profile.KindVMess) {
+		t.Fatalf("after reconnect: transport %q, want the pinned vmess", st.Tunnel.TransportKind)
+	}
+	cl := <-e.client
+	if got := exchange(t, cl, echo.TCP, []byte("hi")); got != "echo:hi" {
+		t.Fatalf("flow after reconnect: %q", got)
+	}
+	if _, on := e.plat.KillSwitchActive(); !on {
+		t.Fatal("the kill switch must stay on after reconnect")
+	}
+}

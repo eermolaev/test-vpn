@@ -582,15 +582,34 @@ func (d *Daemon) failoverLocked(s Settings) bool {
 	return true
 }
 
-// Reconnect re-checks the tunnel now.
+// Reconnect restarts the tunnel with the stored profile and settings.
 func (d *Daemon) Reconnect() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.tun == nil {
+	if d.tun == nil && !d.st.view().Connected {
 		return errors.New("not connected")
 	}
-	d.tun.Reconnect()
-	return nil
+	id := d.profileID
+	if d.tun == nil {
+		id = "" // a failed connect: retry the selected profile
+	}
+	sp, ok := d.profileByID(id)
+	if !ok {
+		return errors.New("the connected profile no longer exists")
+	}
+	// Start over with the stored profile and settings, so a newly pinned
+	// transport or an edited profile is used. The kill switch stays on.
+	d.logf("reconnecting %q", sp.Name)
+	if d.tun != nil {
+		d.teardownLocked(false)
+	}
+	err := d.connectLocked(sp, d.st.view().Settings)
+	if err != nil {
+		d.plat.DestroyTUN()
+		d.lastErr = err.Error()
+		d.logf("reconnect failed: %v", err)
+	}
+	return err
 }
 
 // SetSettings validates and stores settings; a running tunnel applies them
