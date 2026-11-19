@@ -109,6 +109,19 @@ WireGuard, OpenVPN, proxies and SSH are easy to recognise on the wire, so the
 client never falls back to them from VLESS or AmneziaWG; a profile made only of
 them is used as it is. Several links on separate lines become one profile.
 
+### Mux (VLESS without flow, Trojan, VMess)
+
+Add `mux=8` to a `vless://` or `trojan://` link (or `"mux": {"enabled": true}`
+in xray JSON) to carry up to 8 connections over one connection to the server
+(xray mux.cool, with XUDP for UDP). New pages then open without a new TCP and
+TLS handshake each, which helps a lot on networks that lose handshakes to the
+server. It needs an xray server and does not work with
+`flow=xtls-rprx-vision` (the server must have a user without flow); xhttp and
+gRPC multiplex by themselves and ignore it. To turn it on for a transport you
+already have, import the same link with `mux=8` into the profile
+(`testvpn import --into ID -` or `a` in the dashboard): a transport with the
+same server, port and network is updated, not duplicated.
+
 ### Hysteria 2
 
 ```

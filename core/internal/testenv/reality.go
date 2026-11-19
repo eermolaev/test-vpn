@@ -28,7 +28,9 @@ import (
 // (RAW + Vision and XHTTP), Trojan + REALITY, and VMess over bare TCP and
 // WebSocket. Its freedom outbound reaches loopback services.
 type RealityServer struct {
-	Vision  *profile.VLESSConfig
+	Vision *profile.VLESSConfig
+	// Plain is VLESS over REALITY without flow (mux works there).
+	Plain   *profile.VLESSConfig
 	XHTTP   *profile.VLESSConfig
 	Trojan  *profile.VLESSConfig
 	VMess   *profile.VLESSConfig
@@ -57,6 +59,7 @@ func StartReality(t testing.TB) *RealityServer {
 	sid := hex.EncodeToString([]byte{0xab, 0xcd, 0xef, 0x01})
 	visionPort, xhttpPort := freePort(t), freePort(t)
 	trojanPort, vmessPort, vmessWSPort := freePort(t), freePort(t), freePort(t)
+	plainPort := freePort(t)
 	reality := map[string]any{
 		"target":      site.String(),
 		"serverNames": []string{realitySNI},
@@ -84,6 +87,7 @@ func StartReality(t testing.TB) *RealityServer {
 		"log": map[string]any{"loglevel": "none"},
 		"inbounds": []any{
 			inbound(visionPort, "raw", "xtls-rprx-vision", nil),
+			inbound(plainPort, "raw", "", nil),
 			inbound(xhttpPort, "xhttp", "", map[string]any{"xhttpSettings": map[string]any{"path": "/x"}}),
 			map[string]any{
 				"listen": "127.0.0.1", "port": trojanPort, "protocol": "trojan",
@@ -123,7 +127,8 @@ func StartReality(t testing.TB) *RealityServer {
 		Address: "127.0.0.1", UUID: uuid, Security: "reality",
 		SNI: realitySNI, Fingerprint: "chrome", PublicKey: b64url(pub), ShortID: sid,
 	}
-	vision, xh := base, base
+	vision, xh, plain := base, base, base
+	plain.Port, plain.Network = plainPort, "raw"
 	vision.Port, vision.Network, vision.Flow = visionPort, "raw", "xtls-rprx-vision"
 	xh.Port, xh.Network, xh.Path = xhttpPort, "xhttp", "/x"
 	trojan := base
@@ -131,7 +136,7 @@ func StartReality(t testing.TB) *RealityServer {
 	vm := profile.VLESSConfig{Protocol: "vmess", Address: "127.0.0.1", Port: vmessPort, UUID: uuid, Cipher: "auto", Network: "raw", Security: "none"}
 	vmws := vm
 	vmws.Port, vmws.Network, vmws.Path = vmessWSPort, "ws", "/vm"
-	return &RealityServer{Vision: &vision, XHTTP: &xh, Trojan: &trojan, VMess: &vm, VMessWS: &vmws, inst: inst}
+	return &RealityServer{Vision: &vision, Plain: &plain, XHTTP: &xh, Trojan: &trojan, VMess: &vm, VMessWS: &vmws, inst: inst}
 }
 
 // Vision2ID returns the transport ID of the Vision inbound.

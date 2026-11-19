@@ -58,6 +58,13 @@ func (c *VLESSConfig) streamFromQuery(q url.Values) error {
 	if hdr := q.Get("headerType"); hdr != "" && hdr != "none" {
 		return unsupported("%s: headerType %q", c.Proto(), hdr)
 	}
+	if m := q.Get("mux"); m != "" {
+		n, err := strconv.Atoi(m)
+		if err != nil {
+			return invalid("%s: mux must be a number, got %q", c.Proto(), m)
+		}
+		c.Mux = n
+	}
 	return nil
 }
 
@@ -87,6 +94,9 @@ func FormatVLESSURL(c *VLESSConfig, name string) string {
 	set("mode", c.Mode)
 	set("serviceName", c.ServiceName)
 	set("alpn", strings.Join(c.ALPN, ","))
+	if c.Mux > 0 {
+		q.Set("mux", strconv.Itoa(c.Mux))
+	}
 	u := url.URL{
 		Scheme:   "vless",
 		User:     url.User(c.UUID),

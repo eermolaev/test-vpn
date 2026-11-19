@@ -228,10 +228,21 @@ type VLESSConfig struct {
 	Host        string `json:"host,omitempty"`
 	Mode        string `json:"mode,omitempty"` // xhttp mode
 	ServiceName string `json:"serviceName,omitempty"`
+	// Mux carries up to Mux connections over one connection to the server
+	// (xray mux.cool), so a new flow does not need a new TCP and TLS
+	// handshake. 0 is off. Needs an xray server; incompatible with flow.
+	Mux int `json:"mux,omitempty"`
 	// Fragment is chosen by the tunnel at run time: an index into
 	// xray.Fragments (0: the ClientHello is sent whole). Never stored.
 	Fragment int `json:"-"`
 }
+
+// MaxMux is the largest mux concurrency xray accepts; DefaultMux is xray's
+// default.
+const (
+	MaxMux     = 1024
+	DefaultMux = 8
+)
 
 // DefaultFingerprint is the uTLS fingerprint used when the profile has none.
 const DefaultFingerprint = "chrome"
@@ -364,15 +375,22 @@ func (p *Profile) Validate() error {
 // Merge appends the transports of other to p (SEC-NET-001: one profile, many
 // transports), skipping transports with the same ID.
 func (p *Profile) Merge(other *Profile) {
-	seen := map[string]bool{}
-	for _, t := range p.Transports {
-		seen[t.ID()] = true
+	index := map[string]int{}
+	for i, t := range p.Transports {
+		index[t.ID()] = i
 	}
 	for _, t := range other.Transports {
-		if !seen[t.ID()] {
-			p.Transports = append(p.Transports, t)
-			seen[t.ID()] = true
+		if i, ok := index[t.ID()]; ok {
+			// The same server again: take the new settings (e.g. mux or
+			// new keys) and keep the label if the new link has none.
+			if t.Label == "" {
+				t.Label = p.Transports[i].Label
+			}
+			p.Transports[i] = t
+			continue
 		}
+		index[t.ID()] = len(p.Transports)
+		p.Transports = append(p.Transports, t)
 	}
 }
 
@@ -522,6 +540,16 @@ func (c *VLESSConfig) validate() error {
 	}
 	if c.Flow != "" && c.Network != "raw" {
 		return invalid("%s: flow %s requires raw/tcp transport", p, c.Flow)
+	}
+	if c.Mux < 0 || c.Mux > MaxMux {
+		return invalid("%s: mux must be 0..%d", p, MaxMux)
+	}
+	if c.Mux > 0 && c.Flow != "" {
+		return invalid("%s: mux does not work with flow %s", p, c.Flow)
+	}
+	if c.Mux > 0 && (c.Network == "xhttp" || c.Network == "grpc") {
+		// Both multiplex by themselves.
+		c.Mux = 0
 	}
 	if c.Security == "" {
 		c.Security = "none"

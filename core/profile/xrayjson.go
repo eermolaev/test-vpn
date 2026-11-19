@@ -15,6 +15,10 @@ type xrayOutbound struct {
 	Tag            string          `json:"tag"`
 	Settings       json.RawMessage `json:"settings"`
 	StreamSettings *xrayStream     `json:"streamSettings"`
+	Mux            *struct {
+		Enabled     bool    `json:"enabled"`
+		Concurrency flexInt `json:"concurrency"`
+	} `json:"mux"`
 }
 
 type xrayUser struct {
@@ -160,6 +164,13 @@ func xrayOutboundToTransport(ob xrayOutbound) (*Transport, error) {
 		c.Address, c.Port = s.Address, int(s.Port)
 	}
 	c.UUID, c.Flow, c.Password = user.ID, user.Flow, user.Password
+	// xray ignores mux with flow; so do we rather than reject the config.
+	if m := ob.Mux; m != nil && m.Enabled && m.Concurrency >= 0 && c.Flow == "" {
+		c.Mux = int(m.Concurrency)
+		if c.Mux == 0 {
+			c.Mux = DefaultMux // xray's default concurrency
+		}
+	}
 	switch ob.Protocol {
 	case "vless":
 		if e := user.Encryption; e != "" && e != "none" {

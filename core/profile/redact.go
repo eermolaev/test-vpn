@@ -87,6 +87,9 @@ func (p *Profile) Summarize() Summary {
 			if v.Flow != "" {
 				ts.Detail += "+vision"
 			}
+			if v.Mux > 0 {
+				ts.Detail += "+mux"
+			}
 			if v.Proto() != "vless" {
 				ts.Detail += "+" + v.Security
 			}

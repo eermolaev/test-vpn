@@ -122,12 +122,21 @@ func BuildConfig(c *profile.VLESSConfig) ([]byte, error) {
 			"address": c.Address, "port": c.Port, "users": []any{user},
 		}}}
 	}
-	return withOutbound(map[string]any{
+	out := map[string]any{
 		"tag":            "proxy",
 		"protocol":       c.Proto(),
 		"settings":       settings,
 		"streamSettings": stream,
-	}, extra...)
+	}
+	if c.Mux > 0 {
+		// UDP goes over the same connections (XUDP); QUIC to port 443
+		// keeps its own connection, as browsers expect.
+		out["mux"] = map[string]any{
+			"enabled": true, "concurrency": c.Mux,
+			"xudpConcurrency": c.Mux, "xudpProxyUDP443": "skip",
+		}
+	}
+	return withOutbound(out, extra...)
 }
 
 // BuildProxyConfig renders the xray JSON config for a SOCKS5, HTTP(S) or
